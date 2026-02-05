@@ -17,6 +17,7 @@
 #include <unistd.h>
 
 #define CTRL_KEY(k) ((k) & 0x1f)
+#define KILL_RING_MAX 16
 
 typedef struct {
   char **lines;
@@ -46,9 +47,15 @@ typedef struct {
   bool prompt_save_as;
   char prompt_buf[256];
   size_t prompt_len;
-  char *kill_buf;
-  size_t kill_len;
+  char *kill_ring[KILL_RING_MAX];
+  size_t kill_ring_len;
+  size_t kill_ring_index;
   bool last_was_kill;
+  bool last_was_yank;
+  size_t yank_start_row;
+  size_t yank_start_col;
+  size_t yank_end_row;
+  size_t yank_end_col;
   bool mark_active;
   size_t mark_row;
   size_t mark_col;
@@ -551,6 +558,57 @@ static void buffer_delete_range(Buffer *buf, size_t row, size_t start,
   memmove(line + start, line + end, len - end + 1);
 }
 
+static void buffer_delete_region(Buffer *buf, size_t start_row,
+                                 size_t start_col, size_t end_row,
+                                 size_t end_col) {
+  if (start_row >= buf->line_count || end_row >= buf->line_count) {
+    return;
+  }
+  if (pos_compare(start_row, start_col, end_row, end_col) > 0) {
+    size_t tmp_row = start_row;
+    size_t tmp_col = start_col;
+    start_row = end_row;
+    start_col = end_col;
+    end_row = tmp_row;
+    end_col = tmp_col;
+  }
+  if (start_row == end_row) {
+    buffer_delete_range(buf, start_row, start_col, end_col);
+    return;
+  }
+
+  size_t start_len = line_length(buf, start_row);
+  if (start_col > start_len) {
+    start_col = start_len;
+  }
+  size_t end_len = line_length(buf, end_row);
+  if (end_col > end_len) {
+    end_col = end_len;
+  }
+
+  char *end_tail = strdup(buf->lines[end_row] + end_col);
+  if (!end_tail) {
+    die("strdup");
+  }
+  char *start_line = buf->lines[start_row];
+  start_line[start_col] = '\0';
+  char *merged = realloc(start_line, start_col + strlen(end_tail) + 1);
+  if (!merged) {
+    die("realloc");
+  }
+  memcpy(merged + start_col, end_tail, strlen(end_tail) + 1);
+  free(end_tail);
+  buf->lines[start_row] = merged;
+
+  for (size_t i = start_row + 1; i <= end_row; i++) {
+    free(buf->lines[i]);
+  }
+  size_t remove_count = end_row - start_row;
+  memmove(&buf->lines[start_row + 1], &buf->lines[end_row + 1],
+          sizeof(*buf->lines) * (buf->line_count - end_row - 1));
+  buf->line_count -= remove_count;
+}
+
 static void editor_scroll(Editor *ed) {
   Frame *frame = &ed->frame;
   size_t text_rows = 0;
@@ -715,22 +773,30 @@ static bool buffer_write_file(Buffer *buf, const char *path) {
 
 static void editor_kill_set(Editor *ed, const char *data, size_t len,
                             bool append) {
-  if (!append) {
-    free(ed->kill_buf);
-    ed->kill_buf = NULL;
-    ed->kill_len = 0;
-  }
   if (len == 0) {
     return;
   }
-  char *buf = realloc(ed->kill_buf, ed->kill_len + len + 1);
+  if (!append || ed->kill_ring_len == 0) {
+    size_t next_index = 0;
+    if (ed->kill_ring_len < KILL_RING_MAX) {
+      next_index = ed->kill_ring_len;
+      ed->kill_ring_len++;
+    } else {
+      next_index = (ed->kill_ring_index + 1) % KILL_RING_MAX;
+      free(ed->kill_ring[next_index]);
+    }
+    ed->kill_ring_index = next_index;
+    ed->kill_ring[next_index] = NULL;
+  }
+  char **entry = &ed->kill_ring[ed->kill_ring_index];
+  size_t cur_len = *entry ? strlen(*entry) : 0;
+  char *buf = realloc(*entry, cur_len + len + 1);
   if (!buf) {
     die("realloc");
   }
-  memcpy(buf + ed->kill_len, data, len);
-  ed->kill_len += len;
-  buf[ed->kill_len] = '\0';
-  ed->kill_buf = buf;
+  memcpy(buf + cur_len, data, len);
+  buf[cur_len + len] = '\0';
+  *entry = buf;
 }
 
 static void editor_kill_newline_and_next(Editor *ed) {
@@ -838,12 +904,13 @@ static void editor_kill_word_backward(Editor *ed) {
   }
 }
 
-static void editor_yank(Editor *ed) {
-  if (ed->kill_len == 0 || !ed->kill_buf) {
-    return;
+static bool editor_yank_from(Editor *ed, const char *data) {
+  if (!data) {
+    return false;
   }
-  const char *data = ed->kill_buf;
-  size_t len = ed->kill_len;
+  size_t len = strlen(data);
+  ed->yank_start_row = ed->frame.row;
+  ed->yank_start_col = ed->frame.col;
   for (size_t i = 0; i < len; i++) {
     if (data[i] == '\n') {
       buffer_insert_newline(&ed->buffer, ed->frame.row, ed->frame.col);
@@ -854,7 +921,17 @@ static void editor_yank(Editor *ed) {
       ed->frame.col++;
     }
   }
+  ed->yank_end_row = ed->frame.row;
+  ed->yank_end_col = ed->frame.col;
   ed->dirty = true;
+  return true;
+}
+
+static bool editor_yank(Editor *ed) {
+  if (ed->kill_ring_len == 0) {
+    return false;
+  }
+  return editor_yank_from(ed, ed->kill_ring[ed->kill_ring_index]);
 }
 
 static void editor_prompt_save_as(Editor *ed) {
@@ -866,6 +943,7 @@ static void editor_prompt_save_as(Editor *ed) {
 
 static void editor_process_key(Editor *ed, uint8_t key) {
   bool reset_kill = true;
+  bool reset_yank = true;
 
   if (key == CTRL_KEY('g')) {
     ed->pending_ctrl_x = false;
@@ -874,6 +952,8 @@ static void editor_process_key(Editor *ed, uint8_t key) {
     ed->prompt_save_as = false;
     ed->prompt_len = 0;
     ed->mark_active = false;
+    ed->last_was_kill = false;
+    ed->last_was_yank = false;
     snprintf(ed->status_msg, sizeof(ed->status_msg), "Quit");
     return;
   }
@@ -949,6 +1029,28 @@ static void editor_process_key(Editor *ed, uint8_t key) {
       ed->dirty = true;
       ed->last_was_kill = true;
       reset_kill = false;
+      goto done;
+    }
+    if (key == 'y') {
+      if (ed->last_was_yank && ed->kill_ring_len > 0) {
+        size_t max = ed->kill_ring_len < KILL_RING_MAX
+          ? ed->kill_ring_len : KILL_RING_MAX;
+        if (max > 1) {
+          if (ed->kill_ring_index == 0) {
+            ed->kill_ring_index = max - 1;
+          } else {
+            ed->kill_ring_index--;
+          }
+          buffer_delete_region(&ed->buffer, ed->yank_start_row,
+                               ed->yank_start_col, ed->yank_end_row,
+                               ed->yank_end_col);
+          ed->frame.row = ed->yank_start_row;
+          ed->frame.col = ed->yank_start_col;
+          editor_yank_from(ed, ed->kill_ring[ed->kill_ring_index]);
+          ed->last_was_yank = true;
+        }
+        reset_yank = false;
+      }
       goto done;
     }
   }
@@ -1031,7 +1133,10 @@ static void editor_process_key(Editor *ed, uint8_t key) {
       break;
     }
     case CTRL_KEY('y'):
-      editor_yank(ed);
+      if (editor_yank(ed)) {
+        ed->last_was_yank = true;
+        reset_yank = false;
+      }
       break;
     case 127:
     case CTRL_KEY('h'):
@@ -1063,6 +1168,9 @@ static void editor_process_key(Editor *ed, uint8_t key) {
 done:
   if (reset_kill) {
     ed->last_was_kill = false;
+  }
+  if (reset_yank) {
+    ed->last_was_yank = false;
   }
 }
 
@@ -1119,9 +1227,17 @@ int main(int argc, char **argv) {
   ed.prompt_active = false;
   ed.prompt_save_as = false;
   ed.prompt_len = 0;
-  ed.kill_buf = NULL;
-  ed.kill_len = 0;
+  for (size_t i = 0; i < KILL_RING_MAX; i++) {
+    ed.kill_ring[i] = NULL;
+  }
+  ed.kill_ring_len = 0;
+  ed.kill_ring_index = 0;
   ed.last_was_kill = false;
+  ed.last_was_yank = false;
+  ed.yank_start_row = 0;
+  ed.yank_start_col = 0;
+  ed.yank_end_row = 0;
+  ed.yank_end_col = 0;
   ed.mark_active = false;
   ed.mark_row = 0;
   ed.mark_col = 0;
@@ -1137,7 +1253,9 @@ int main(int argc, char **argv) {
   editor_loop(&ed);
 
   buffer_free(&ed.buffer);
-  free(ed.kill_buf);
+  for (size_t i = 0; i < ed.kill_ring_len; i++) {
+    free(ed.kill_ring[i]);
+  }
   free(ed.file_path);
   return 0;
 }
