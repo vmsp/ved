@@ -113,6 +113,21 @@ static void ab_append_char(AppendBuf *ab, char ch) {
   ab_append(ab, &ch, 1);
 }
 
+static void write_all(int fd, const char *data, size_t len) {
+  size_t offset = 0;
+  while (offset < len) {
+    ssize_t written = write(fd, data + offset, len - offset);
+    if (written > 0) {
+      offset += (size_t)written;
+      continue;
+    }
+    if (written == -1 && errno == EINTR) {
+      continue;
+    }
+    break;
+  }
+}
+
 static void disable_raw_mode(void) {
   if (!g_editor) {
     return;
@@ -579,7 +594,7 @@ static void editor_refresh_screen(Editor *ed) {
   snprintf(buf, sizeof(buf), "\x1b[%d;%dH", cursor_row, cursor_col);
   ab_append_str(&ab, buf);
   ab_append_str(&ab, "\x1b[?25h");
-  write(STDOUT_FILENO, ab.data, ab.len);
+  write_all(STDOUT_FILENO, ab.data, ab.len);
   ab_free(&ab);
 }
 
