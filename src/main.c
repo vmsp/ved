@@ -291,6 +291,84 @@ static bool selection_range_for_row(const Editor *ed, size_t row,
   return true;
 }
 
+static bool editor_get_region(const Editor *ed, size_t *start_row,
+                              size_t *start_col, size_t *end_row,
+                              size_t *end_col) {
+  if (!ed->mark_active) {
+    return false;
+  }
+  size_t row_a = ed->mark_row;
+  size_t col_a = ed->mark_col;
+  size_t row_b = ed->frame.row;
+  size_t col_b = ed->frame.col;
+
+  if (pos_compare(row_a, col_a, row_b, col_b) > 0) {
+    size_t tmp_row = row_a;
+    size_t tmp_col = col_a;
+    row_a = row_b;
+    col_a = col_b;
+    row_b = tmp_row;
+    col_b = tmp_col;
+  }
+  if (row_a == row_b && col_a == col_b) {
+    return false;
+  }
+  *start_row = row_a;
+  *start_col = col_a;
+  *end_row = row_b;
+  *end_col = col_b;
+  return true;
+}
+
+static char *editor_copy_region_text(Editor *ed, size_t *out_len) {
+  size_t start_row = 0;
+  size_t start_col = 0;
+  size_t end_row = 0;
+  size_t end_col = 0;
+  if (!editor_get_region(ed, &start_row, &start_col, &end_row, &end_col)) {
+    return NULL;
+  }
+  *out_len = 0;
+  char *buf = NULL;
+
+  for (size_t row = start_row; row <= end_row; row++) {
+    const char *line = ed->buffer.lines[row];
+    size_t len = line_length(&ed->buffer, row);
+    size_t from = 0;
+    size_t to = len;
+    if (row == start_row) {
+      from = start_col < len ? start_col : len;
+    }
+    if (row == end_row) {
+      to = end_col < len ? end_col : len;
+    }
+    if (to > from) {
+      size_t add = to - from;
+      char *next = realloc(buf, *out_len + add + 1);
+      if (!next) {
+        free(buf);
+        die("realloc");
+      }
+      buf = next;
+      memcpy(buf + *out_len, line + from, add);
+      *out_len += add;
+      buf[*out_len] = '\0';
+    }
+    if (row < end_row) {
+      char *next = realloc(buf, *out_len + 2);
+      if (!next) {
+        free(buf);
+        die("realloc");
+      }
+      buf = next;
+      buf[*out_len] = '\n';
+      (*out_len)++;
+      buf[*out_len] = '\0';
+    }
+  }
+  return buf;
+}
+
 static bool is_word_char(unsigned char ch) {
   if (ch >= 128) {
     return true;
@@ -934,6 +1012,41 @@ static bool editor_yank(Editor *ed) {
   return editor_yank_from(ed, ed->kill_ring[ed->kill_ring_index]);
 }
 
+static bool editor_copy_region(Editor *ed) {
+  size_t text_len = 0;
+  char *text = editor_copy_region_text(ed, &text_len);
+  if (!text) {
+    return false;
+  }
+  editor_kill_set(ed, text, text_len, false);
+  free(text);
+  ed->mark_active = false;
+  return true;
+}
+
+static bool editor_kill_region(Editor *ed) {
+  size_t start_row = 0;
+  size_t start_col = 0;
+  size_t end_row = 0;
+  size_t end_col = 0;
+  if (!editor_get_region(ed, &start_row, &start_col, &end_row, &end_col)) {
+    return false;
+  }
+  size_t text_len = 0;
+  char *text = editor_copy_region_text(ed, &text_len);
+  if (!text) {
+    return false;
+  }
+  editor_kill_set(ed, text, text_len, ed->last_was_kill);
+  free(text);
+  buffer_delete_region(&ed->buffer, start_row, start_col, end_row, end_col);
+  ed->frame.row = start_row;
+  ed->frame.col = start_col;
+  ed->dirty = true;
+  ed->mark_active = false;
+  return true;
+}
+
 static void editor_prompt_save_as(Editor *ed) {
   ed->prompt_active = true;
   ed->prompt_save_as = true;
@@ -1029,6 +1142,16 @@ static void editor_process_key(Editor *ed, uint8_t key) {
       ed->dirty = true;
       ed->last_was_kill = true;
       reset_kill = false;
+      goto done;
+    }
+    if (key == 'w') {
+      if (editor_copy_region(ed)) {
+        snprintf(ed->status_msg, sizeof(ed->status_msg), "Copied");
+      } else {
+        snprintf(ed->status_msg, sizeof(ed->status_msg), "No region");
+      }
+      ed->last_was_kill = false;
+      reset_kill = true;
       goto done;
     }
     if (key == 'y') {
@@ -1136,6 +1259,15 @@ static void editor_process_key(Editor *ed, uint8_t key) {
       if (editor_yank(ed)) {
         ed->last_was_yank = true;
         reset_yank = false;
+      }
+      break;
+    case CTRL_KEY('w'):
+      if (editor_kill_region(ed)) {
+        ed->last_was_kill = true;
+        reset_kill = false;
+        snprintf(ed->status_msg, sizeof(ed->status_msg), "Killed");
+      } else {
+        snprintf(ed->status_msg, sizeof(ed->status_msg), "No region");
       }
       break;
     case 127:
