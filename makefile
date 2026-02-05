@@ -6,13 +6,13 @@
 CFLAGS := -std=c23 -Isrc
 LDFLAGS :=
 
-ifeq ($(MODE), dbg)
+ifeq ($(mode), dbg)
 CFLAGS += -g3 -O0 -Wall -Wextra -Wpedantic -DDEBUG
 else
-CFLAGS += -g0 -Ofast -flto -DNDEBUG
+CFLAGS += -g0 -O3 -ffast-math -flto -DNDEBUG
 endif
 
-ifdef $(SAN)
+ifdef $(san)
 san_flags := -fsanitize=address,undefined
 CFLAGS += $(san_flags)
 LDFLAGS += $(san_flags)
