@@ -20,7 +20,9 @@ endif
 
 srcs := \
 	src/main.c \
-	src/editor.c \
+	src/editor_core.c \
+	src/editor_render.c \
+	src/editor_input.c \
 	src/buffer.c \
 	src/utf8.c \
 	src/util.c
