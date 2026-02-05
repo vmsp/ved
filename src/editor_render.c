@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Vitor Manuel de Sousa Pereira <vmsousapereira@gmail.com>
 // SPDX-License-Identifier: MIT
 
-#include "editor_internal.h"
+#include "editor.h"
 
 #include <errno.h>
 #include <poll.h>

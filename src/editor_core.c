@@ -15,7 +15,6 @@
 #include <unistd.h>
 
 #include "buffer.h"
-#include "editor_internal.h"
 #include "util.h"
 
 static Editor *g_editor;
