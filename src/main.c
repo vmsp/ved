@@ -1,4 +1,4 @@
-// Copyright (C) 2026 Vitor Manuel de Sousa Pereira <vmsousapereira@gmail.com>
+// Copyright (c) 2026 Vitor Manuel de Sousa Pereira <vmsousapereira@gmail.com>
 // SPDX-License-Identifier: MIT
 
 #include <errno.h>
@@ -49,6 +49,9 @@ typedef struct {
   char *kill_buf;
   size_t kill_len;
   bool last_was_kill;
+  bool mark_active;
+  size_t mark_row;
+  size_t mark_col;
   char status_msg[128];
 } Editor;
 
@@ -63,6 +66,9 @@ static void disable_raw_mode(void) {
   if (!g_editor) {
     return;
   }
+  write(STDOUT_FILENO, "\x1b[?25h", 6);
+  write(STDOUT_FILENO, "\x1b[m", 3);
+  write(STDOUT_FILENO, "\x1b[?1049l", 8);
   tcsetattr(STDIN_FILENO, TCSAFLUSH, &g_editor->orig_termios);
   if (g_editor->stdin_flags >= 0) {
     fcntl(STDIN_FILENO, F_SETFL, g_editor->stdin_flags);
@@ -97,6 +103,7 @@ static void enable_raw_mode(Editor *ed) {
   if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw) == -1) {
     die("tcsetattr");
   }
+  write(STDOUT_FILENO, "\x1b[?1049h", 8);
 }
 
 static void get_window_size(Editor *ed) {
@@ -217,6 +224,64 @@ static size_t utf8_clamp_col(const char *line, size_t len, size_t col) {
     col = utf8_prev_boundary(line, col);
   }
   return col;
+}
+
+static int pos_compare(size_t row_a, size_t col_a, size_t row_b, size_t col_b) {
+  if (row_a < row_b) {
+    return -1;
+  }
+  if (row_a > row_b) {
+    return 1;
+  }
+  if (col_a < col_b) {
+    return -1;
+  }
+  if (col_a > col_b) {
+    return 1;
+  }
+  return 0;
+}
+
+static bool selection_range_for_row(const Editor *ed, size_t row,
+                                    size_t *start, size_t *end) {
+  if (!ed->mark_active) {
+    return false;
+  }
+  size_t row_a = ed->mark_row;
+  size_t col_a = ed->mark_col;
+  size_t row_b = ed->frame.row;
+  size_t col_b = ed->frame.col;
+
+  if (pos_compare(row_a, col_a, row_b, col_b) > 0) {
+    size_t tmp_row = row_a;
+    size_t tmp_col = col_a;
+    row_a = row_b;
+    col_a = col_b;
+    row_b = tmp_row;
+    col_b = tmp_col;
+  }
+
+  if (row < row_a || row > row_b) {
+    return false;
+  }
+  if (row == row_a && row == row_b) {
+    *start = col_a;
+    *end = col_b;
+    return col_a != col_b;
+  }
+  if (row == row_a) {
+    *start = col_a;
+    *end = SIZE_MAX;
+    return true;
+  }
+  if (row == row_b) {
+    *start = 0;
+    *end = col_b;
+    return col_b != 0;
+  }
+  *start = 0;
+  *end = SIZE_MAX;
+  return true;
 }
 
 static bool is_word_char(unsigned char ch) {
@@ -539,7 +604,48 @@ static void editor_refresh_screen(Editor *ed) {
         len = ed->screen_cols;
       }
       if (len > 0) {
-        write(STDOUT_FILENO, line, len);
+        size_t sel_start = 0;
+        size_t sel_end = 0;
+        bool has_sel = selection_range_for_row(ed, file_row, &sel_start,
+                                               &sel_end);
+        if (!has_sel) {
+          write(STDOUT_FILENO, line, len);
+        } else {
+          size_t line_len = strlen(ed->buffer.lines[file_row]);
+          if (sel_end > line_len) {
+            sel_end = line_len;
+          }
+          if (sel_start > line_len) {
+            sel_start = line_len;
+          }
+          if (sel_end < sel_start) {
+            sel_end = sel_start;
+          }
+          if (sel_end <= ed->col_offset ||
+              sel_start >= ed->col_offset + len) {
+            write(STDOUT_FILENO, line, len);
+          } else {
+            size_t vis_start = ed->col_offset;
+            size_t vis_end = ed->col_offset + len;
+            size_t draw_start = sel_start > vis_start ? sel_start : vis_start;
+            size_t draw_end = sel_end < vis_end ? sel_end : vis_end;
+            size_t before_len = draw_start - vis_start;
+            size_t sel_len = draw_end - draw_start;
+            size_t after_len = vis_end - draw_end;
+
+            if (before_len > 0) {
+              write(STDOUT_FILENO, line, before_len);
+            }
+            if (sel_len > 0) {
+              write(STDOUT_FILENO, "\x1b[7m", 4);
+              write(STDOUT_FILENO, line + before_len, sel_len);
+              write(STDOUT_FILENO, "\x1b[m", 3);
+            }
+            if (after_len > 0) {
+              write(STDOUT_FILENO, line + before_len + sel_len, after_len);
+            }
+          }
+        }
       }
     }
     write(STDOUT_FILENO, "\x1b[K", 3);
@@ -761,6 +867,17 @@ static void editor_prompt_save_as(Editor *ed) {
 static void editor_process_key(Editor *ed, uint8_t key) {
   bool reset_kill = true;
 
+  if (key == CTRL_KEY('g')) {
+    ed->pending_ctrl_x = false;
+    ed->pending_escape = false;
+    ed->prompt_active = false;
+    ed->prompt_save_as = false;
+    ed->prompt_len = 0;
+    ed->mark_active = false;
+    snprintf(ed->status_msg, sizeof(ed->status_msg), "Quit");
+    return;
+  }
+
   if (ed->prompt_active) {
     if (key == 27) {
       ed->prompt_active = false;
@@ -854,6 +971,20 @@ static void editor_process_key(Editor *ed, uint8_t key) {
   }
 
   switch (key) {
+    case 0:
+      if (ed->mark_active &&
+          ed->mark_row == ed->frame.row &&
+          ed->mark_col == ed->frame.col) {
+        ed->mark_active = false;
+        snprintf(ed->status_msg, sizeof(ed->status_msg), "Mark cleared");
+      } else {
+        ed->mark_active = true;
+        ed->mark_row = ed->frame.row;
+        ed->mark_col = ed->frame.col;
+        snprintf(ed->status_msg, sizeof(ed->status_msg), "Mark set");
+      }
+      reset_kill = true;
+      break;
     case 27:
       ed->pending_escape = true;
       reset_kill = true;
@@ -991,6 +1122,9 @@ int main(int argc, char **argv) {
   ed.kill_buf = NULL;
   ed.kill_len = 0;
   ed.last_was_kill = false;
+  ed.mark_active = false;
+  ed.mark_row = 0;
+  ed.mark_col = 0;
   snprintf(ed.status_msg, sizeof(ed.status_msg),
            "C-x C-s to save");
   ed.frame.buffer = &ed.buffer;

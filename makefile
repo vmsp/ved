@@ -1,9 +1,9 @@
-# Copyright (C) 2026 Vitor Manuel de Sousa Pereira <vmsousapereira@gmail.com>
+# Copyright (c) 2026 Vitor Manuel de Sousa Pereira <vmsousapereira@gmail.com>
 # SPDX-License-Identifier: MIT
 
 .SUFFIXES:
 
-CFLAGS := -std=c23 -Isrc
+CFLAGS := -std=c23
 LDFLAGS :=
 
 ifeq ($(MODE), dbg)
