@@ -5,14 +5,49 @@
 
 #include <ctype.h>
 #include <errno.h>
+#include <poll.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #include "buffer.h"
 #include "utf8.h"
 #include "util.h"
+
+static void write_all(int fd, const char *data, size_t len) {
+  size_t offset = 0;
+  while (offset < len) {
+    ssize_t written = write(fd, data + offset, len - offset);
+    if (written > 0) {
+      offset += (size_t)written;
+      continue;
+    }
+    if (written == -1 && errno == EINTR) {
+      continue;
+    }
+    if (written == -1 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+      struct pollfd pfd = {
+        .fd = fd,
+        .events = POLLOUT
+      };
+      poll(&pfd, 1, -1);
+      continue;
+    }
+    break;
+  }
+}
+
+static void osc52_set_clipboard(const char *data, size_t len) {
+  char *b64 = base64_encode(data, len);
+  const char *prefix = "\x1b]52;c;";
+  const char *suffix = "\x07";
+  write_all(STDOUT_FILENO, prefix, strlen(prefix));
+  write_all(STDOUT_FILENO, b64, strlen(b64));
+  write_all(STDOUT_FILENO, suffix, strlen(suffix));
+  free(b64);
+}
 
 static bool editor_get_region(const Editor *ed, size_t *start_row,
                               size_t *start_col, size_t *end_row,
@@ -402,6 +437,7 @@ static bool editor_copy_region(Editor *ed) {
     return false;
   }
   editor_kill_set(ed, text, text_len, false);
+  osc52_set_clipboard(text, text_len);
   free(text);
   ed->mark_active = false;
   return true;
@@ -421,6 +457,7 @@ static bool editor_kill_region(Editor *ed) {
     return false;
   }
   editor_kill_set(ed, text, text_len, ed->last_was_kill);
+  osc52_set_clipboard(text, text_len);
   free(text);
   buffer_delete_region(&ed->buffer, start_row, start_col, end_row, end_col);
   ed->frame.row = start_row;

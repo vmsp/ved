@@ -19,11 +19,11 @@ LDFLAGS += $(san_flags)
 endif
 
 srcs := \
-	src/main.c \
-	src/editor_core.c \
-	src/editor_render.c \
-	src/editor_input.c \
 	src/buffer.c \
+	src/editor_core.c \
+	src/editor_input.c \
+	src/editor_render.c \
+	src/main.c \
 	src/utf8.c \
 	src/util.c
 objs := $(srcs:.c=.o)

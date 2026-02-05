@@ -4,6 +4,9 @@
 #ifndef VED_UTIL_H
 #define VED_UTIL_H
 
+#include <stdlib.h>
+
+char *base64_encode(const char *data, size_t len);
 void die(const char *msg);
 
 #endif
