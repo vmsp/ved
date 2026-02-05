@@ -3,7 +3,7 @@
 
 .SUFFIXES:
 
-CFLAGS := -std=c23
+CFLAGS := -std=c23 -Isrc
 LDFLAGS :=
 
 ifeq ($(MODE), dbg)
@@ -18,7 +18,12 @@ CFLAGS += $(san_flags)
 LDFLAGS += $(san_flags)
 endif
 
-srcs := src/main.c
+srcs := \
+	src/main.c \
+	src/editor.c \
+	src/buffer.c \
+	src/utf8.c \
+	src/util.c
 objs := $(srcs:.c=.o)
 deps := $(objs:.o=.d)
 
