@@ -124,6 +124,14 @@ static void write_all(int fd, const char *data, size_t len) {
     if (written == -1 && errno == EINTR) {
       continue;
     }
+    if (written == -1 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+      struct pollfd pfd = {
+        .fd = fd,
+        .events = POLLOUT
+      };
+      poll(&pfd, 1, -1);
+      continue;
+    }
     break;
   }
 }
