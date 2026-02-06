@@ -4,3 +4,6 @@
 - C-s / C-r
 - inotify
 - C / Rust / Makefile
+- Mouse selection
+- Mouse scrolling
+- C-a, C-e MWIM

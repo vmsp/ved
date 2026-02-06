@@ -3,7 +3,7 @@
 
 .SUFFIXES:
 
-CFLAGS := -std=c23 -Isrc
+CFLAGS := -std=c23 -Ivendor/tree-sitter/lib/include
 LDFLAGS :=
 
 ifeq ($(mode), dbg)
@@ -12,7 +12,7 @@ else
 CFLAGS += -g0 -O3 -ffast-math -flto -DNDEBUG
 endif
 
-ifdef $(san)
+ifdef san
 san_flags := -fsanitize=address,undefined
 CFLAGS += $(san_flags)
 LDFLAGS += $(san_flags)
@@ -25,7 +25,9 @@ srcs := \
 	src/editor_render.c \
 	src/main.c \
 	src/utf8.c \
-	src/util.c
+	src/util.c \
+	vendor/tree-sitter/lib/src/lib.c \
+	vendor/tree-sitter-c/src/parser.c
 objs := $(srcs:.c=.o)
 deps := $(objs:.o=.d)
 
