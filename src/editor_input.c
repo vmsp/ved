@@ -16,6 +16,8 @@
 #include "utf8.h"
 #include "util.h"
 
+#define KEY_BACKSPACE 127
+
 static void write_all(int fd, const char *data, size_t len) {
   size_t offset = 0;
   while (offset < len) {
@@ -524,7 +526,7 @@ void editor_process_key(Editor *ed, uint8_t key) {
       ed->prompt_save_as = false;
       return;
     }
-    if (key == 127 || key == CTRL_KEY('h')) {
+    if (key == KEY_BACKSPACE) {
       if (ed->prompt_len > 0) {
         size_t new_len = utf8_prev_boundary(ed->prompt_buf, ed->prompt_len);
         ed->prompt_len = new_len;
@@ -532,7 +534,7 @@ void editor_process_key(Editor *ed, uint8_t key) {
       }
       return;
     }
-    if (key >= 32 && key != 127 &&
+    if (key >= 32 && key != KEY_BACKSPACE &&
         ed->prompt_len + 1 < sizeof(ed->prompt_buf)) {
       ed->prompt_buf[ed->prompt_len++] = (char)key;
       ed->prompt_buf[ed->prompt_len] = '\0';
@@ -560,7 +562,7 @@ void editor_process_key(Editor *ed, uint8_t key) {
       reset_kill = false;
       goto done;
     }
-    if (key == 127 || key == CTRL_KEY('h')) {
+    if (key == KEY_BACKSPACE) {
       editor_kill_word_backward(ed);
       ed->dirty = true;
       ed->buffer.syntax_dirty = true;
@@ -696,8 +698,7 @@ void editor_process_key(Editor *ed, uint8_t key) {
         snprintf(ed->status_msg, sizeof(ed->status_msg), "No region");
       }
       break;
-    case 127:
-    case CTRL_KEY('h'):
+    case KEY_BACKSPACE:
       if (ed->frame.col > 0 || ed->frame.row > 0) {
         buffer_delete_char(&ed->buffer, ed->frame.row, ed->frame.col);
         frame_move_prev_char(&ed->frame);
@@ -718,7 +719,7 @@ void editor_process_key(Editor *ed, uint8_t key) {
       ed->buffer.syntax_dirty = true;
       break;
     default:
-      if (key >= 32 && key != 127) {
+      if (key >= 32 && key != KEY_BACKSPACE) {
         buffer_insert_char(&ed->buffer, ed->frame.row, ed->frame.col, key);
         ed->frame.col++;
         ed->dirty = true;

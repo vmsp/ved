@@ -9,7 +9,7 @@ PREFIX ?= /usr/local/bin
 CFLAGS := -std=c23 -Ivendor/tree-sitter/lib/include
 LDFLAGS :=
 
-ifeq ($(MODE), dbg)
+ifeq ($(MODE), dev)
 CFLAGS += -g3 -O0 -Wall -Wextra -Wpedantic -DDEBUG
 else
 CFLAGS += -g0 -O3 -ffast-math -flto -DNDEBUG
