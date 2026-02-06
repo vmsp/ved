@@ -14,7 +14,6 @@
 #include <termios.h>
 #include <unistd.h>
 
-#include "buffer.h"
 #include "util.h"
 
 static Editor *g_editor;
@@ -145,6 +144,7 @@ Editor *editor_create(int argc, char **argv) {
   ed->mark_col = 0;
   snprintf(ed->status_msg, sizeof(ed->status_msg),
            "C-x C-s to save");
+  buffer_init_syntax(&ed->buffer, ed->file_path);
   ed->frame.buffer = &ed->buffer;
   ed->frame.row = 0;
   ed->frame.col = 0;

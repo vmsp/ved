@@ -13,6 +13,24 @@
 #include "utf8.h"
 #include "util.h"
 
+extern const TSLanguage *tree_sitter_c(void);
+
+static const unsigned char C_HIGHLIGHT_QUERY[] = {
+#embed "../vendor/tree-sitter-c/queries/highlights.scm"
+  , 0
+};
+
+static bool has_c_extension(const char *path) {
+  if (!path) {
+    return false;
+  }
+  const char *dot = strrchr(path, '.');
+  if (!dot) {
+    return false;
+  }
+  return strcmp(dot, ".c") == 0 || strcmp(dot, ".h") == 0;
+}
+
 void buffer_init(Buffer *buf) {
   buf->line_count = 1;
   buf->lines = calloc(buf->line_count, sizeof(*buf->lines));
@@ -23,6 +41,11 @@ void buffer_init(Buffer *buf) {
   if (!buf->lines[0]) {
     die("strdup");
   }
+  buf->syntax_enabled = false;
+  buf->syntax_dirty = false;
+  buf->ts_parser = NULL;
+  buf->ts_tree = NULL;
+  buf->ts_query = NULL;
 }
 
 void buffer_free(Buffer *buf) {
@@ -30,6 +53,15 @@ void buffer_free(Buffer *buf) {
     free(buf->lines[i]);
   }
   free(buf->lines);
+  if (buf->ts_tree) {
+    ts_tree_delete(buf->ts_tree);
+  }
+  if (buf->ts_query) {
+    ts_query_delete(buf->ts_query);
+  }
+  if (buf->ts_parser) {
+    ts_parser_delete(buf->ts_parser);
+  }
 }
 
 void buffer_clear(Buffer *buf) {
@@ -76,6 +108,29 @@ void buffer_load_file(Buffer *buf, const char *path) {
 
   if (buf->line_count == 0) {
     buffer_append_line(buf, "");
+  }
+}
+
+void buffer_init_syntax(Buffer *buf, const char *path) {
+  buf->syntax_enabled = has_c_extension(path);
+  buf->syntax_dirty = buf->syntax_enabled;
+  if (!buf->syntax_enabled) {
+    return;
+  }
+  const char *query_source = (const char *)C_HIGHLIGHT_QUERY;
+  size_t query_len = sizeof(C_HIGHLIGHT_QUERY) - 1;
+  buf->ts_parser = ts_parser_new();
+  if (!buf->ts_parser || !ts_parser_set_language(buf->ts_parser,
+                                                 tree_sitter_c())) {
+    buf->syntax_enabled = false;
+    return;
+  }
+  uint32_t error_offset = 0;
+  TSQueryError error_type = TSQueryErrorNone;
+  buf->ts_query = ts_query_new(tree_sitter_c(), query_source, query_len,
+                               &error_offset, &error_type);
+  if (!buf->ts_query || error_type != TSQueryErrorNone) {
+    buf->syntax_enabled = false;
   }
 }
 

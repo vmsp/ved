@@ -3,16 +3,19 @@
 
 .SUFFIXES:
 
+TARGET ?= ved
+PREFIX ?= /usr/local/bin
+
 CFLAGS := -std=c23 -Ivendor/tree-sitter/lib/include
 LDFLAGS :=
 
-ifeq ($(mode), dbg)
+ifeq ($(MODE), dbg)
 CFLAGS += -g3 -O0 -Wall -Wextra -Wpedantic -DDEBUG
 else
 CFLAGS += -g0 -O3 -ffast-math -flto -DNDEBUG
 endif
 
-ifdef san
+ifdef SAN
 san_flags := -fsanitize=address,undefined
 CFLAGS += $(san_flags)
 LDFLAGS += $(san_flags)
@@ -31,13 +34,19 @@ srcs := \
 objs := $(srcs:.c=.o)
 deps := $(objs:.o=.d)
 
-ved: $(objs)
+$(TARGET): $(objs)
 	$(CC) $(LDFLAGS) -o $@ $^
 
 %.o: %.c
 	$(CC) $(CFLAGS) -MMD -MF $*.d -MP -c $< -o $@
 
-clean:
-	$(RM) ved $(objs) $(deps)
+install: $(TARGET)
+	install -m 755 $(TARGET) $(PREFIX)
 
-.PHONY: clean
+uninstall:
+	$(RM) $(PREFIX)/$(TARGET)
+
+clean:
+	$(RM) $(TARGET) $(objs) $(deps)
+
+.PHONY: install uninstall clean

@@ -9,7 +9,7 @@ VED is an emacs-style editor that runs on the terminal.
 - Event-driven and non-blocking
 - Ensure it runs on any POSIX
 - Do not depend on system libraries that are not generally available
-- Always compile with `make mode=dbg` after changes
+- Always compile with `make MODE=dbg` after changes
 
 ## Code Style
 

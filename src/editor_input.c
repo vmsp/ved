@@ -420,6 +420,7 @@ static bool editor_yank_from(Editor *ed, const char *data) {
   ed->yank_end_row = ed->frame.row;
   ed->yank_end_col = ed->frame.col;
   ed->dirty = true;
+  ed->buffer.syntax_dirty = true;
   return true;
 }
 
@@ -463,6 +464,7 @@ static bool editor_kill_region(Editor *ed) {
   ed->frame.row = start_row;
   ed->frame.col = start_col;
   ed->dirty = true;
+  ed->buffer.syntax_dirty = true;
   ed->mark_active = false;
   return true;
 }
@@ -553,6 +555,7 @@ void editor_process_key(Editor *ed, uint8_t key) {
     if (key == 'd') {
       editor_kill_word_forward(ed);
       ed->dirty = true;
+      ed->buffer.syntax_dirty = true;
       ed->last_was_kill = true;
       reset_kill = false;
       goto done;
@@ -560,6 +563,7 @@ void editor_process_key(Editor *ed, uint8_t key) {
     if (key == 127 || key == CTRL_KEY('h')) {
       editor_kill_word_backward(ed);
       ed->dirty = true;
+      ed->buffer.syntax_dirty = true;
       ed->last_was_kill = true;
       reset_kill = false;
       goto done;
@@ -667,9 +671,11 @@ void editor_process_key(Editor *ed, uint8_t key) {
         editor_kill_set(ed, line + frame->col, kill_len, ed->last_was_kill);
         line[frame->col] = '\0';
         ed->dirty = true;
+        ed->buffer.syntax_dirty = true;
       } else if (frame->row + 1 < buf->line_count) {
         editor_kill_newline_and_next(ed);
         ed->dirty = true;
+        ed->buffer.syntax_dirty = true;
       }
       ed->last_was_kill = true;
       reset_kill = false;
@@ -696,6 +702,7 @@ void editor_process_key(Editor *ed, uint8_t key) {
         buffer_delete_char(&ed->buffer, ed->frame.row, ed->frame.col);
         frame_move_prev_char(&ed->frame);
         ed->dirty = true;
+        ed->buffer.syntax_dirty = true;
       }
       break;
     case '\r':
@@ -703,16 +710,19 @@ void editor_process_key(Editor *ed, uint8_t key) {
       ed->frame.row++;
       ed->frame.col = 0;
       ed->dirty = true;
+      ed->buffer.syntax_dirty = true;
       break;
     case CTRL_KEY('d'):
       buffer_delete_forward(&ed->buffer, ed->frame.row, ed->frame.col);
       ed->dirty = true;
+      ed->buffer.syntax_dirty = true;
       break;
     default:
       if (key >= 32 && key != 127) {
         buffer_insert_char(&ed->buffer, ed->frame.row, ed->frame.col, key);
         ed->frame.col++;
         ed->dirty = true;
+        ed->buffer.syntax_dirty = true;
       }
       break;
   }
