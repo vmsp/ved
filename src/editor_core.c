@@ -24,6 +24,8 @@ static void disable_raw_mode(void) {
   }
   write(STDOUT_FILENO, "\x1b[?25h", 6);
   write(STDOUT_FILENO, "\x1b[m", 3);
+  write(STDOUT_FILENO, "\x1b[?1000l", 8);
+  write(STDOUT_FILENO, "\x1b[?1006l", 8);
   write(STDOUT_FILENO, "\x1b[?1049l", 8);
   tcsetattr(STDIN_FILENO, TCSAFLUSH, &g_editor->orig_termios);
   if (g_editor->stdin_flags >= 0) {
@@ -59,6 +61,8 @@ static void enable_raw_mode(Editor *ed) {
   if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw) == -1) {
     die("tcsetattr");
   }
+  write(STDOUT_FILENO, "\x1b[?1000h", 8);
+  write(STDOUT_FILENO, "\x1b[?1006h", 8);
   write(STDOUT_FILENO, "\x1b[?1049h", 8);
 }
 
@@ -124,7 +128,8 @@ Editor *editor_create(int argc, char **argv) {
   }
   ed->dirty = false;
   ed->pending_ctrl_x = false;
-  ed->pending_escape = false;
+  ed->esc_state = ESC_NONE;
+  ed->esc_len = 0;
   ed->prompt_active = false;
   ed->prompt_save_as = false;
   ed->prompt_len = 0;

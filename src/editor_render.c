@@ -422,6 +422,13 @@ static void editor_scroll(Editor *ed) {
       frame->row >= ed->row_offset + text_rows) {
     ed->row_offset = frame->row - text_rows + 1;
   }
+  if (ed->row_offset + text_rows > ed->buffer.line_count) {
+    if (ed->buffer.line_count > text_rows) {
+      ed->row_offset = ed->buffer.line_count - text_rows;
+    } else {
+      ed->row_offset = 0;
+    }
+  }
   if (frame->col < ed->col_offset) {
     ed->col_offset = frame->col;
   }

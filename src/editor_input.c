@@ -478,13 +478,176 @@ static void editor_prompt_save_as(Editor *ed) {
   ed->prompt_buf[0] = '\0';
 }
 
+static bool handle_meta_key(Editor *ed, uint8_t key, bool *reset_kill,
+                            bool *reset_yank) {
+  if (key == 'f') {
+    frame_move_next_word(&ed->frame);
+    *reset_kill = true;
+    return true;
+  }
+  if (key == 'b') {
+    frame_move_prev_word(&ed->frame);
+    *reset_kill = true;
+    return true;
+  }
+  if (key == 'd') {
+    editor_kill_word_forward(ed);
+    ed->dirty = true;
+    ed->buffer.syntax_dirty = true;
+    ed->last_was_kill = true;
+    *reset_kill = false;
+    return true;
+  }
+  if (key == KEY_BACKSPACE) {
+    editor_kill_word_backward(ed);
+    ed->dirty = true;
+    ed->buffer.syntax_dirty = true;
+    ed->last_was_kill = true;
+    *reset_kill = false;
+    return true;
+  }
+  if (key == 'w') {
+    if (editor_copy_region(ed)) {
+      snprintf(ed->status_msg, sizeof(ed->status_msg), "Copied");
+    } else {
+      snprintf(ed->status_msg, sizeof(ed->status_msg), "No region");
+    }
+    ed->last_was_kill = false;
+    *reset_kill = true;
+    return true;
+  }
+  if (key == 'y') {
+    if (ed->last_was_yank && ed->kill_ring_len > 0) {
+      size_t max = ed->kill_ring_len < KILL_RING_MAX
+        ? ed->kill_ring_len : KILL_RING_MAX;
+      if (max > 1) {
+        if (ed->kill_ring_index == 0) {
+          ed->kill_ring_index = max - 1;
+        } else {
+          ed->kill_ring_index--;
+        }
+        buffer_delete_region(&ed->buffer, ed->yank_start_row,
+                             ed->yank_start_col, ed->yank_end_row,
+                             ed->yank_end_col);
+        ed->frame.row = ed->yank_start_row;
+        ed->frame.col = ed->yank_start_col;
+        editor_yank_from(ed, ed->kill_ring[ed->kill_ring_index]);
+        ed->last_was_yank = true;
+      }
+      *reset_yank = false;
+    }
+    return true;
+  }
+  return false;
+}
+
+static bool handle_mouse_event(Editor *ed, const char *seq, char type) {
+  char *end = NULL;
+  long b = strtol(seq, &end, 10);
+  if (!end || *end != ';') {
+    return false;
+  }
+  long x = strtol(end + 1, &end, 10);
+  if (!end || *end != ';') {
+    return false;
+  }
+  long y = strtol(end + 1, &end, 10);
+  if (!end) {
+    return false;
+  }
+  if (type != 'M') {
+    return true;
+  }
+  int text_rows = ed->screen_rows > 1 ? ed->screen_rows - 1 : 0;
+  if (x <= 0 || y <= 0 || y > text_rows) {
+    return true;
+  }
+  if (b == 64) {
+    if (ed->row_offset > 0) {
+      ed->row_offset--;
+      if (ed->frame.row > 0) {
+        ed->frame.row--;
+      }
+    }
+    return true;
+  }
+  if (b == 65) {
+    if (ed->row_offset + 1 < ed->buffer.line_count) {
+      ed->row_offset++;
+      if (ed->frame.row + 1 < ed->buffer.line_count) {
+        ed->frame.row++;
+      }
+    }
+    return true;
+  }
+  if (b != 0) {
+    return true;
+  }
+  size_t row = ed->row_offset + (size_t)(y - 1);
+  if (row >= ed->buffer.line_count) {
+    row = ed->buffer.line_count - 1;
+  }
+  size_t col = ed->col_offset + (size_t)(x - 1);
+  ed->frame.row = row;
+  ed->frame.col = col;
+  frame_clamp_col(&ed->frame);
+  return true;
+}
+
+static bool handle_escape(Editor *ed, uint8_t key, bool *reset_kill,
+                          bool *reset_yank) {
+  if (ed->esc_state == ESC_SEEN) {
+    if (key == '[') {
+      ed->esc_state = ESC_CSI;
+      return true;
+    }
+    ed->esc_state = ESC_NONE;
+    return handle_meta_key(ed, key, reset_kill, reset_yank);
+  }
+  if (ed->esc_state == ESC_CSI) {
+    if (key == '<') {
+      ed->esc_state = ESC_MOUSE;
+      ed->esc_len = 0;
+      return true;
+    }
+    ed->esc_state = ESC_NONE;
+    return false;
+  }
+  if (ed->esc_state == ESC_MOUSE) {
+    if (key == 'm' || key == 'M') {
+      ed->esc_buf[ed->esc_len] = '\0';
+      ed->esc_state = ESC_NONE;
+      return handle_mouse_event(ed, ed->esc_buf, (char)key);
+    }
+    if (ed->esc_len + 1 < sizeof(ed->esc_buf)) {
+      ed->esc_buf[ed->esc_len++] = (char)key;
+    } else {
+      ed->esc_state = ESC_NONE;
+    }
+    return true;
+  }
+  return false;
+}
+
 void editor_process_key(Editor *ed, uint8_t key) {
   bool reset_kill = true;
   bool reset_yank = true;
 
+  if (ed->esc_state != ESC_NONE) {
+    if (handle_escape(ed, key, &reset_kill, &reset_yank)) {
+      goto done;
+    }
+  }
+
+  if (key == 27) {
+    ed->esc_state = ESC_SEEN;
+    goto done;
+  }
+
   if (key == CTRL_KEY('g')) {
     ed->pending_ctrl_x = false;
-    ed->pending_escape = false;
+    ed->esc_state = ESC_NONE;
+    ed->esc_len = 0;
     ed->prompt_active = false;
     ed->prompt_save_as = false;
     ed->prompt_len = 0;
@@ -499,7 +662,6 @@ void editor_process_key(Editor *ed, uint8_t key) {
     if (key == 27) {
       ed->prompt_active = false;
       ed->prompt_save_as = false;
-      ed->pending_escape = false;
       snprintf(ed->status_msg, sizeof(ed->status_msg), "Save canceled");
       return;
     }
@@ -542,68 +704,6 @@ void editor_process_key(Editor *ed, uint8_t key) {
     return;
   }
 
-  if (ed->pending_escape) {
-    ed->pending_escape = false;
-    if (key == 'f') {
-      frame_move_next_word(&ed->frame);
-      reset_kill = true;
-      goto done;
-    }
-    if (key == 'b') {
-      frame_move_prev_word(&ed->frame);
-      reset_kill = true;
-      goto done;
-    }
-    if (key == 'd') {
-      editor_kill_word_forward(ed);
-      ed->dirty = true;
-      ed->buffer.syntax_dirty = true;
-      ed->last_was_kill = true;
-      reset_kill = false;
-      goto done;
-    }
-    if (key == KEY_BACKSPACE) {
-      editor_kill_word_backward(ed);
-      ed->dirty = true;
-      ed->buffer.syntax_dirty = true;
-      ed->last_was_kill = true;
-      reset_kill = false;
-      goto done;
-    }
-    if (key == 'w') {
-      if (editor_copy_region(ed)) {
-        snprintf(ed->status_msg, sizeof(ed->status_msg), "Copied");
-      } else {
-        snprintf(ed->status_msg, sizeof(ed->status_msg), "No region");
-      }
-      ed->last_was_kill = false;
-      reset_kill = true;
-      goto done;
-    }
-    if (key == 'y') {
-      if (ed->last_was_yank && ed->kill_ring_len > 0) {
-        size_t max = ed->kill_ring_len < KILL_RING_MAX
-          ? ed->kill_ring_len : KILL_RING_MAX;
-        if (max > 1) {
-          if (ed->kill_ring_index == 0) {
-            ed->kill_ring_index = max - 1;
-          } else {
-            ed->kill_ring_index--;
-          }
-          buffer_delete_region(&ed->buffer, ed->yank_start_row,
-                               ed->yank_start_col, ed->yank_end_row,
-                               ed->yank_end_col);
-          ed->frame.row = ed->yank_start_row;
-          ed->frame.col = ed->yank_start_col;
-          editor_yank_from(ed, ed->kill_ring[ed->kill_ring_index]);
-          ed->last_was_yank = true;
-        }
-        reset_yank = false;
-      }
-      goto done;
-    }
-  }
-
   if (ed->pending_ctrl_x) {
     ed->pending_ctrl_x = false;
     if (key == CTRL_KEY('s')) {
@@ -634,10 +734,6 @@ void editor_process_key(Editor *ed, uint8_t key) {
         ed->mark_col = ed->frame.col;
         snprintf(ed->status_msg, sizeof(ed->status_msg), "Mark set");
       }
-      reset_kill = true;
-      break;
-    case 27:
-      ed->pending_escape = true;
       reset_kill = true;
       break;
     case CTRL_KEY('x'):

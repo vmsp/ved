@@ -20,6 +20,13 @@ typedef struct {
   size_t col;
 } Frame;
 
+typedef enum {
+  ESC_NONE = 0,
+  ESC_SEEN,
+  ESC_CSI,
+  ESC_MOUSE
+} EscState;
+
 typedef struct Editor {
   struct termios orig_termios;
   int stdin_flags;
@@ -32,7 +39,9 @@ typedef struct Editor {
   char *file_path;
   bool dirty;
   bool pending_ctrl_x;
-  bool pending_escape;
+  EscState esc_state;
+  char esc_buf[32];
+  size_t esc_len;
   bool prompt_active;
   bool prompt_save_as;
   char prompt_buf[256];
