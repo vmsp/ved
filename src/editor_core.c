@@ -25,6 +25,7 @@ static void disable_raw_mode(void) {
   write(STDOUT_FILENO, "\x1b[?25h", 6);
   write(STDOUT_FILENO, "\x1b[m", 3);
   write(STDOUT_FILENO, "\x1b[?1000l", 8);
+  write(STDOUT_FILENO, "\x1b[?1002l", 8);
   write(STDOUT_FILENO, "\x1b[?1006l", 8);
   write(STDOUT_FILENO, "\x1b[?1049l", 8);
   tcsetattr(STDIN_FILENO, TCSAFLUSH, &g_editor->orig_termios);
@@ -62,6 +63,7 @@ static void enable_raw_mode(Editor *ed) {
     die("tcsetattr");
   }
   write(STDOUT_FILENO, "\x1b[?1000h", 8);
+  write(STDOUT_FILENO, "\x1b[?1002h", 8);
   write(STDOUT_FILENO, "\x1b[?1006h", 8);
   write(STDOUT_FILENO, "\x1b[?1049h", 8);
 }

@@ -1,9 +1,8 @@
 - Undo/Redo
 - M-P
-- TreeSitter
 - C-s / C-r
 - inotify
-- C / Rust / Makefile
-- Mouse selection
-- Mouse scrolling
+- Rust / Makefile
 - C-a, C-e MWIM
+- Splits
+- Tab

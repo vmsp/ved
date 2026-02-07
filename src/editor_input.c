@@ -555,9 +555,7 @@ static bool handle_mouse_event(Editor *ed, const char *seq, char type) {
   if (!end) {
     return false;
   }
-  if (type != 'M') {
-    return true;
-  }
+  bool pressed = type == 'M';
   int text_rows = ed->screen_rows > 1 ? ed->screen_rows - 1 : 0;
   if (x <= 0 || y <= 0 || y > text_rows) {
     return true;
@@ -580,17 +578,41 @@ static bool handle_mouse_event(Editor *ed, const char *seq, char type) {
     }
     return true;
   }
-  if (b != 0) {
+  if (b == 0) {
+    size_t row = ed->row_offset + (size_t)(y - 1);
+    if (row >= ed->buffer.line_count) {
+      row = ed->buffer.line_count - 1;
+    }
+    size_t col = ed->col_offset + (size_t)(x - 1);
+    if (pressed) {
+      ed->mark_active = true;
+      ed->mark_row = row;
+      ed->mark_col = col;
+    }
+    ed->frame.row = row;
+    ed->frame.col = col;
+    frame_clamp_col(&ed->frame);
+    if (!pressed) {
+      return true;
+    }
+  } else if (b != 32) {
     return true;
   }
-  size_t row = ed->row_offset + (size_t)(y - 1);
-  if (row >= ed->buffer.line_count) {
-    row = ed->buffer.line_count - 1;
+  if (b == 32) {
+    size_t row = ed->row_offset + (size_t)(y - 1);
+    if (row >= ed->buffer.line_count) {
+      row = ed->buffer.line_count - 1;
+    }
+    size_t col = ed->col_offset + (size_t)(x - 1);
+    if (!ed->mark_active) {
+      ed->mark_active = true;
+      ed->mark_row = ed->frame.row;
+      ed->mark_col = ed->frame.col;
+    }
+    ed->frame.row = row;
+    ed->frame.col = col;
+    frame_clamp_col(&ed->frame);
   }
-  size_t col = ed->col_offset + (size_t)(x - 1);
-  ed->frame.row = row;
-  ed->frame.col = col;
-  frame_clamp_col(&ed->frame);
   return true;
 }
 
