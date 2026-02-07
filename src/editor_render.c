@@ -6,6 +6,7 @@
 #include <errno.h>
 #include <poll.h>
 #include <stddef.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -22,9 +23,12 @@ typedef struct {
 } AppendBuf;
 
 typedef struct {
-  size_t start;
-  size_t end;
+  size_t start_row;
+  size_t start_col;
+  size_t end_row;
+  size_t end_col;
   const char *color;
+  uint8_t priority;
 } HighlightSpan;
 
 static void ab_init(AppendBuf *ab) {
@@ -121,6 +125,31 @@ static const char *capture_color(const char *name) {
   return NULL;
 }
 
+static uint8_t capture_priority(const char *name) {
+  if (strcmp(name, "comment") == 0) {
+    return 6;
+  }
+  if (strcmp(name, "string") == 0) {
+    return 5;
+  }
+  if (strcmp(name, "number") == 0) {
+    return 4;
+  }
+  if (strcmp(name, "function") == 0) {
+    return 4;
+  }
+  if (strcmp(name, "type") == 0) {
+    return 3;
+  }
+  if (strcmp(name, "keyword") == 0) {
+    return 2;
+  }
+  if (strcmp(name, "preproc") == 0) {
+    return 1;
+  }
+  return 0;
+}
+
 static char *build_buffer_text(Editor *ed, size_t *out_len) {
   size_t total = 0;
   for (size_t i = 0; i < ed->buffer.line_count; i++) {
@@ -177,6 +206,7 @@ static HighlightSpan *collect_highlights(Editor *ed, size_t range_start,
   if (!cursor) {
     return NULL;
   }
+  ts_query_cursor_set_byte_range(cursor, range_start, range_end);
   ts_query_cursor_exec(cursor, ed->buffer.ts_query,
                        ts_tree_root_node(ed->buffer.ts_tree));
 
@@ -184,49 +214,57 @@ static HighlightSpan *collect_highlights(Editor *ed, size_t range_start,
   size_t span_count = 0;
   size_t span_cap = 0;
   TSQueryMatch match;
-  while (ts_query_cursor_next_match(cursor, &match)) {
-    for (uint32_t i = 0; i < match.capture_count; i++) {
-      TSQueryCapture capture = match.captures[i];
-      uint32_t name_len = 0;
-      const char *name = ts_query_capture_name_for_id(ed->buffer.ts_query,
-                                                      capture.index,
-                                                      &name_len);
-      if (!name) {
-        continue;
-      }
-      char name_buf[32];
-      if (name_len >= sizeof(name_buf)) {
-        continue;
-      }
-      memcpy(name_buf, name, name_len);
-      name_buf[name_len] = '\0';
-      const char *color = capture_color(name_buf);
-      if (!color) {
-        continue;
-      }
-      size_t start = ts_node_start_byte(capture.node);
-      size_t end = ts_node_end_byte(capture.node);
-      if (end <= range_start || start >= range_end) {
-        continue;
-      }
-      if (span_count == span_cap) {
-        size_t next = span_cap ? span_cap * 2 : 64;
-        HighlightSpan *next_spans = realloc(spans,
-                                            sizeof(*spans) * next);
-        if (!next_spans) {
-          free(spans);
-          ts_query_cursor_delete(cursor);
-          die("realloc");
-        }
-        spans = next_spans;
-        span_cap = next;
-      }
-      spans[span_count++] = (HighlightSpan){
-        .start = start,
-        .end = end,
-        .color = color
-      };
+  uint32_t capture_index = 0;
+  while (ts_query_cursor_next_capture(cursor, &match, &capture_index)) {
+    if (capture_index >= match.capture_count) {
+      continue;
     }
+    TSQueryCapture capture = match.captures[capture_index];
+    uint32_t name_len = 0;
+    const char *name = ts_query_capture_name_for_id(ed->buffer.ts_query,
+                                                    capture.index,
+                                                    &name_len);
+    if (!name) {
+      continue;
+    }
+    char name_buf[32];
+    if (name_len >= sizeof(name_buf)) {
+      continue;
+    }
+    memcpy(name_buf, name, name_len);
+    name_buf[name_len] = '\0';
+    const char *color = capture_color(name_buf);
+    if (!color) {
+      continue;
+    }
+    uint8_t priority = capture_priority(name_buf);
+    size_t start = ts_node_start_byte(capture.node);
+    size_t end = ts_node_end_byte(capture.node);
+    if (end <= range_start || start >= range_end) {
+      continue;
+    }
+    TSPoint start_point = ts_node_start_point(capture.node);
+    TSPoint end_point = ts_node_end_point(capture.node);
+    if (span_count == span_cap) {
+      size_t next = span_cap ? span_cap * 2 : 64;
+      HighlightSpan *next_spans = realloc(spans,
+                                          sizeof(*spans) * next);
+      if (!next_spans) {
+        free(spans);
+        ts_query_cursor_delete(cursor);
+        die("realloc");
+      }
+      spans = next_spans;
+      span_cap = next;
+    }
+    spans[span_count++] = (HighlightSpan){
+      .start_row = start_point.row,
+      .start_col = start_point.column,
+      .end_row = end_point.row,
+      .end_col = end_point.column,
+      .color = color,
+      .priority = priority
+    };
   }
   ts_query_cursor_delete(cursor);
   *out_count = span_count;
@@ -236,50 +274,97 @@ static HighlightSpan *collect_highlights(Editor *ed, size_t range_start,
 static int span_compare(const void *a, const void *b) {
   const HighlightSpan *lhs = a;
   const HighlightSpan *rhs = b;
-  if (lhs->start < rhs->start) {
+  if (lhs->start_row < rhs->start_row) {
     return -1;
   }
-  if (lhs->start > rhs->start) {
+  if (lhs->start_row > rhs->start_row) {
     return 1;
   }
-  if (lhs->end < rhs->end) {
+  if (lhs->start_col < rhs->start_col) {
     return -1;
   }
-  if (lhs->end > rhs->end) {
+  if (lhs->start_col > rhs->start_col) {
     return 1;
   }
   return 0;
 }
 
 static void render_line_with_spans(AppendBuf *ab, const char *line,
-                                   size_t line_start, size_t vis_start,
-                                   size_t vis_len, HighlightSpan *spans,
+                                   size_t line_len, size_t file_row,
+                                   size_t vis_col, size_t vis_len,
+                                   HighlightSpan *spans,
                                    size_t span_count) {
-  size_t vis_end = vis_start + vis_len;
-  size_t cursor = vis_start;
+  const char **colors = calloc(line_len, sizeof(*colors));
+  uint8_t *prio = calloc(line_len, sizeof(*prio));
+  if (!colors) {
+    die("calloc");
+  }
+  if (!prio) {
+    free(colors);
+    die("calloc");
+  }
   for (size_t i = 0; i < span_count; i++) {
     HighlightSpan span = spans[i];
-    if (span.end <= cursor || span.start >= vis_end) {
+    if (file_row < span.start_row || file_row > span.end_row) {
       continue;
     }
-    size_t seg_start = span.start > cursor ? span.start : cursor;
-    size_t seg_end = span.end < vis_end ? span.end : vis_end;
-    if (seg_start > cursor) {
-      size_t offset = cursor - line_start;
-      size_t len = seg_start - cursor;
-      ab_append(ab, line + offset, len);
+    size_t start = 0;
+    size_t end = line_len;
+    if (file_row == span.start_row) {
+      start = span.start_col;
     }
-    ab_append_str(ab, span.color);
-    ab_append(ab, line + (seg_start - line_start), seg_end - seg_start);
-    ab_append_str(ab, "\x1b[m");
-    cursor = seg_end;
-    if (cursor >= vis_end) {
-      break;
+    if (file_row == span.end_row) {
+      end = span.end_col < line_len ? span.end_col : line_len;
+    }
+    if (start > line_len) {
+      continue;
+    }
+    if (end > line_len) {
+      end = line_len;
+    }
+    if (end <= start) {
+      continue;
+    }
+    for (size_t j = start; j < end; j++) {
+      if (span.priority >= prio[j]) {
+        prio[j] = span.priority;
+        colors[j] = span.color;
+      }
     }
   }
-  if (cursor < vis_end) {
-    ab_append(ab, line + (cursor - line_start), vis_end - cursor);
+
+  size_t vis_end = vis_col + vis_len;
+  size_t start = vis_col < line_len ? vis_col : line_len;
+  size_t end = vis_end < line_len ? vis_end : line_len;
+  const char *active = NULL;
+  size_t run_start = start;
+  for (size_t i = start; i < end; i++) {
+    const char *color = colors[i];
+    if (color == active) {
+      continue;
+    }
+    if (i > run_start) {
+      if (active) {
+        ab_append_str(ab, active);
+      } else {
+        ab_append_str(ab, "\x1b[m");
+      }
+      ab_append(ab, line + run_start, i - run_start);
+    }
+    run_start = i;
+    active = color;
   }
+  if (end > run_start) {
+    if (active) {
+      ab_append_str(ab, active);
+    } else {
+      ab_append_str(ab, "\x1b[m");
+    }
+    ab_append(ab, line + run_start, end - run_start);
+  }
+  ab_append_str(ab, "\x1b[m");
+  free(colors);
+  free(prio);
 }
 
 static bool selection_range_for_row(const Editor *ed, size_t row,
@@ -366,8 +451,7 @@ void editor_refresh_screen(Editor *ed) {
     if (ed->buffer.syntax_dirty || !ed->buffer.ts_tree) {
       size_t text_len = 0;
       char *text = build_buffer_text(ed, &text_len);
-      TSTree *tree = ts_parser_parse_string(ed->buffer.ts_parser,
-                                            ed->buffer.ts_tree,
+      TSTree *tree = ts_parser_parse_string(ed->buffer.ts_parser, NULL,
                                             text, text_len);
       free(text);
       if (tree) {
@@ -422,10 +506,9 @@ void editor_refresh_screen(Editor *ed) {
         bool has_sel = selection_range_for_row(ed, file_row, &sel_start,
                                                &sel_end);
         if (!has_sel) {
-          if (spans && offsets) {
-            size_t line_start = offsets[file_row];
-            size_t vis_start = line_start + ed->col_offset;
-            render_line_with_spans(&ab, line, line_start, vis_start, vis_len,
+          if (spans) {
+            render_line_with_spans(&ab, line, line_len, file_row,
+                                   ed->col_offset, vis_len,
                                    spans, span_count);
           } else {
             ab_append(&ab, line + ed->col_offset, vis_len);
