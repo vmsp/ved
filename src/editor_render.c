@@ -570,7 +570,7 @@ void editor_refresh_screen(Editor *ed) {
     if (ed->prompt_active) {
       snprintf(status, sizeof(status), " Save as: %s", ed->prompt_buf);
     } else {
-      const char *name = ed->file_path ? ed->file_path : "[No Name]";
+      const char *name = ed->buffer.file_path ? ed->buffer.file_path : "[No Name]";
       const char *dirty = ed->dirty ? "*" : "";
       snprintf(status, sizeof(status), " %s%s | %zu lines | %s",
                name, dirty, ed->buffer.line_count, ed->status_msg);

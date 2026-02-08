@@ -122,11 +122,7 @@ Editor *editor_create(int argc, char **argv) {
 
   buffer_init(&ed->buffer);
   if (argc > 1) {
-    ed->file_path = strdup(argv[1]);
-    if (!ed->file_path) {
-      die("strdup");
-    }
-    buffer_load_file(&ed->buffer, ed->file_path);
+    buffer_load_file(&ed->buffer, argv[1]);
   }
   ed->dirty = false;
   ed->pending_ctrl_x = false;
@@ -151,7 +147,7 @@ Editor *editor_create(int argc, char **argv) {
   ed->mark_col = 0;
   snprintf(ed->status_msg, sizeof(ed->status_msg),
            "C-x C-s to save");
-  buffer_init_syntax(&ed->buffer, ed->file_path);
+  buffer_init_syntax(&ed->buffer, ed->buffer.file_path);
   ed->frame.buffer = &ed->buffer;
   ed->frame.row = 0;
   ed->frame.col = 0;
@@ -175,6 +171,5 @@ void editor_destroy(Editor *ed) {
   for (size_t i = 0; i < ed->kill_ring_len; i++) {
     free(ed->kill_ring[i]);
   }
-  free(ed->file_path);
   free(ed);
 }

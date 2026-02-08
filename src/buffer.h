@@ -9,9 +9,18 @@
 
 #include "tree_sitter/api.h"
 
+typedef enum {
+  C_MODE,
+  MAKEFILE_MODE
+} BufferMode;
+
+BufferMode detect_mode(const char *path);
+
 typedef struct {
   char **lines;
   size_t line_count;
+  char *file_path;
+  BufferMode mode;
   bool syntax_enabled;
   bool syntax_dirty;
   TSParser *ts_parser;
@@ -30,6 +39,7 @@ bool buffer_write_file(Buffer *buf, const char *path);
 
 void buffer_insert_char(Buffer *buf, size_t row, size_t col, char ch);
 void buffer_insert_newline(Buffer *buf, size_t row, size_t col);
+void buffer_insert_tab(Buffer *buf, size_t row, size_t col);
 void buffer_delete_char(Buffer *buf, size_t row, size_t col);
 void buffer_delete_forward(Buffer *buf, size_t row, size_t col);
 void buffer_delete_range(Buffer *buf, size_t row, size_t start, size_t end);

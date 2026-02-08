@@ -36,7 +36,6 @@ typedef struct Editor {
   size_t col_offset;
   Buffer buffer;
   Frame frame;
-  char *file_path;
   bool dirty;
   bool pending_ctrl_x;
   EscState esc_state;

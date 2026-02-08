@@ -696,8 +696,9 @@ void editor_process_key(Editor *ed, uint8_t key) {
           die("strdup");
         }
         if (buffer_write_file(&ed->buffer, path)) {
-          free(ed->file_path);
-          ed->file_path = path;
+          free(ed->buffer.file_path);
+          ed->buffer.file_path = path;
+          ed->buffer.mode = detect_mode(path);
           ed->dirty = false;
           snprintf(ed->status_msg, sizeof(ed->status_msg), "Saved");
         } else {
@@ -729,9 +730,9 @@ void editor_process_key(Editor *ed, uint8_t key) {
   if (ed->pending_ctrl_x) {
     ed->pending_ctrl_x = false;
     if (key == CTRL_KEY('s')) {
-      if (!ed->file_path) {
+      if (!ed->buffer.file_path) {
         editor_prompt_save_as(ed);
-      } else if (buffer_write_file(&ed->buffer, ed->file_path)) {
+      } else if (buffer_write_file(&ed->buffer, ed->buffer.file_path)) {
         ed->dirty = false;
         snprintf(ed->status_msg, sizeof(ed->status_msg), "Saved");
       } else {
@@ -828,6 +829,16 @@ void editor_process_key(Editor *ed, uint8_t key) {
       buffer_insert_newline(&ed->buffer, ed->frame.row, ed->frame.col);
       ed->frame.row++;
       ed->frame.col = 0;
+      ed->dirty = true;
+      ed->buffer.syntax_dirty = true;
+      break;
+    case '\t':
+      buffer_insert_tab(&ed->buffer, ed->frame.row, ed->frame.col);
+      if (ed->buffer.mode == MAKEFILE_MODE) {
+        ed->frame.col++;
+      } else {
+        ed->frame.col += 2;
+      }
       ed->dirty = true;
       ed->buffer.syntax_dirty = true;
       break;

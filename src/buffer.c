@@ -31,6 +31,23 @@ static bool has_c_extension(const char *path) {
   return strcmp(dot, ".c") == 0 || strcmp(dot, ".h") == 0;
 }
 
+static bool is_makefile(const char *path) {
+  if (!path) {
+    return false;
+  }
+  const char *slash = strrchr(path, '/');
+  const char *filename = slash ? slash + 1 : path;
+  return strcmp(filename, "makefile") == 0 ||
+         strcmp(filename, "Makefile") == 0;
+}
+
+BufferMode detect_mode(const char *path) {
+  if (is_makefile(path)) {
+    return MAKEFILE_MODE;
+  }
+  return C_MODE;
+}
+
 void buffer_init(Buffer *buf) {
   buf->line_count = 1;
   buf->lines = calloc(buf->line_count, sizeof(*buf->lines));
@@ -41,6 +58,8 @@ void buffer_init(Buffer *buf) {
   if (!buf->lines[0]) {
     die("strdup");
   }
+  buf->file_path = NULL;
+  buf->mode = C_MODE;
   buf->syntax_enabled = false;
   buf->syntax_dirty = false;
   buf->ts_parser = NULL;
@@ -53,6 +72,7 @@ void buffer_free(Buffer *buf) {
     free(buf->lines[i]);
   }
   free(buf->lines);
+  free(buf->file_path);
   if (buf->ts_tree) {
     ts_tree_delete(buf->ts_tree);
   }
@@ -109,6 +129,13 @@ void buffer_load_file(Buffer *buf, const char *path) {
   if (buf->line_count == 0) {
     buffer_append_line(buf, "");
   }
+
+  free(buf->file_path);
+  buf->file_path = strdup(path);
+  if (!buf->file_path) {
+    die("strdup");
+  }
+  buf->mode = detect_mode(path);
 }
 
 void buffer_init_syntax(Buffer *buf, const char *path) {
@@ -212,6 +239,15 @@ void buffer_insert_newline(Buffer *buf, size_t row, size_t col) {
           sizeof(*buf->lines) * (buf->line_count - row - 1));
   buf->lines[row + 1] = right;
   buf->line_count++;
+}
+
+void buffer_insert_tab(Buffer *buf, size_t row, size_t col) {
+  if (buf->mode == MAKEFILE_MODE) {
+    buffer_insert_char(buf, row, col, '\t');
+  } else {
+    buffer_insert_char(buf, row, col, ' ');
+    buffer_insert_char(buf, row, col + 1, ' ');
+  }
 }
 
 void buffer_delete_char(Buffer *buf, size_t row, size_t col) {
