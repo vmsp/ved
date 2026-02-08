@@ -588,6 +588,10 @@ static bool handle_mouse_event(Editor *ed, const char *seq, char type) {
       ed->mark_active = true;
       ed->mark_row = row;
       ed->mark_col = col;
+    } else {
+      if (ed->mark_active && ed->mark_row == row && ed->mark_col == col) {
+        ed->mark_active = false;
+      }
     }
     ed->frame.row = row;
     ed->frame.col = col;
