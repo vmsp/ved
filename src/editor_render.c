@@ -289,6 +289,27 @@ static int span_compare(const void *a, const void *b) {
   return 0;
 }
 
+static size_t tab_width_at_col(size_t col) {
+  return 8 - (col % 8);
+}
+
+static void ab_append_expanding_tabs(AppendBuf *ab, const char *data,
+                                      size_t len, size_t start_col) {
+  size_t col = start_col;
+  for (size_t i = 0; i < len; i++) {
+    if (data[i] == '\t') {
+      size_t spaces = tab_width_at_col(col);
+      for (size_t s = 0; s < spaces; s++) {
+        ab_append_char(ab, ' ');
+      }
+      col += spaces;
+    } else {
+      ab_append_char(ab, data[i]);
+      col++;
+    }
+  }
+}
+
 static void render_line_with_spans(AppendBuf *ab, const char *line,
                                    size_t line_len, size_t file_row,
                                    size_t vis_col, size_t vis_len,
@@ -338,6 +359,7 @@ static void render_line_with_spans(AppendBuf *ab, const char *line,
   size_t end = vis_end < line_len ? vis_end : line_len;
   const char *active = NULL;
   size_t run_start = start;
+  size_t current_col = utf8_byte_to_vis_col(line, start);
   for (size_t i = start; i < end; i++) {
     const char *color = colors[i];
     if (color == active) {
@@ -349,7 +371,9 @@ static void render_line_with_spans(AppendBuf *ab, const char *line,
       } else {
         ab_append_str(ab, "\x1b[m");
       }
-      ab_append(ab, line + run_start, i - run_start);
+      ab_append_expanding_tabs(ab, line + run_start, i - run_start,
+                               current_col);
+      current_col += utf8_byte_to_vis_col(line + run_start, i - run_start);
     }
     run_start = i;
     active = color;
@@ -360,7 +384,8 @@ static void render_line_with_spans(AppendBuf *ab, const char *line,
     } else {
       ab_append_str(ab, "\x1b[m");
     }
-    ab_append(ab, line + run_start, end - run_start);
+    ab_append_expanding_tabs(ab, line + run_start, end - run_start,
+                             current_col);
   }
   ab_append_str(ab, "\x1b[m");
   free(colors);
@@ -429,15 +454,20 @@ static void editor_scroll(Editor *ed) {
       ed->row_offset = 0;
     }
   }
-  if (frame->col < ed->col_offset) {
-    ed->col_offset = frame->col;
-  }
-  if (frame->col >= ed->col_offset + (size_t)ed->screen_cols) {
-    ed->col_offset = frame->col - ed->screen_cols + 1;
-  }
+
   if (frame->row < ed->buffer.line_count) {
     const char *line = ed->buffer.lines[frame->row];
     size_t len = line_length(&ed->buffer, frame->row);
+    size_t frame_vis_col = utf8_byte_to_vis_col(line, frame->col);
+    size_t offset_vis_col = utf8_byte_to_vis_col(line, ed->col_offset);
+
+    if (frame_vis_col < offset_vis_col) {
+      ed->col_offset = utf8_vis_to_byte_col(line, len, frame_vis_col);
+    }
+    if (frame_vis_col >= offset_vis_col + (size_t)ed->screen_cols) {
+      size_t new_vis_col = frame_vis_col - ed->screen_cols + 1;
+      ed->col_offset = utf8_vis_to_byte_col(line, len, new_vis_col);
+    }
     ed->col_offset = utf8_clamp_col(line, len, ed->col_offset);
   }
 }
@@ -500,13 +530,19 @@ void editor_refresh_screen(Editor *ed) {
     } else {
       const char *line = ed->buffer.lines[file_row];
       size_t line_len = strlen(line);
+
+      size_t vis_offset = utf8_byte_to_vis_col(line, ed->col_offset);
+      size_t vis_end = vis_offset + (size_t)ed->screen_cols;
+      size_t end_byte = utf8_vis_to_byte_col(line, line_len, vis_end);
+
       size_t vis_len = 0;
       if (ed->col_offset < line_len) {
-        vis_len = line_len - ed->col_offset;
+        vis_len = end_byte - ed->col_offset;
       }
       if (vis_len > (size_t)ed->screen_cols) {
         vis_len = ed->screen_cols;
       }
+
       if (vis_len > 0) {
         size_t sel_start = 0;
         size_t sel_end = 0;
@@ -518,7 +554,8 @@ void editor_refresh_screen(Editor *ed) {
                                    ed->col_offset, vis_len,
                                    spans, span_count);
           } else {
-            ab_append(&ab, line + ed->col_offset, vis_len);
+            ab_append_expanding_tabs(&ab, line + ed->col_offset, vis_len,
+                                     vis_offset);
           }
         } else {
           if (sel_end > line_len) {
@@ -531,46 +568,59 @@ void editor_refresh_screen(Editor *ed) {
             sel_end = sel_start;
           }
           if (sel_end <= ed->col_offset ||
-              sel_start >= ed->col_offset + vis_len) {
-            ab_append(&ab, line + ed->col_offset, vis_len);
+              sel_start >= end_byte) {
+            ab_append_expanding_tabs(&ab, line + ed->col_offset, vis_len,
+                                     vis_offset);
           } else {
             size_t vis_start = ed->col_offset;
-            size_t vis_end = ed->col_offset + vis_len;
             size_t draw_start = sel_start > vis_start ? sel_start : vis_start;
-            size_t draw_end = sel_end < vis_end ? sel_end : vis_end;
+            size_t draw_end = sel_end < end_byte ? sel_end : end_byte;
             size_t before_len = draw_start - vis_start;
             size_t sel_len = draw_end - draw_start;
-            size_t after_len = vis_end - draw_end;
+            size_t after_len = end_byte - draw_end;
 
             if (before_len > 0) {
-              ab_append(&ab, line + ed->col_offset, before_len);
+              ab_append_expanding_tabs(&ab, line + ed->col_offset, before_len,
+                                       vis_offset);
             }
             if (sel_len > 0) {
               ab_append_str(&ab, "\x1b[7m");
-              ab_append(&ab, line + ed->col_offset + before_len, sel_len);
+              size_t col = utf8_byte_to_vis_col(line + vis_start, before_len);
+              ab_append_expanding_tabs(&ab,
+                                       line + ed->col_offset + before_len,
+                                       sel_len,
+                                       vis_offset + col);
               ab_append_str(&ab, "\x1b[m");
             }
             if (after_len > 0) {
-              ab_append(&ab, line + ed->col_offset + before_len + sel_len,
-                        after_len);
+              size_t col = utf8_byte_to_vis_col(line + vis_start,
+                                                before_len + sel_len);
+              ab_append_expanding_tabs(&ab,
+                                       line + ed->col_offset + before_len +
+                                       sel_len,
+                                       after_len,
+                                       vis_offset + col);
             }
           }
         }
       }
     }
     ab_append_str(&ab, "\x1b[K");
-    if (y < ed->screen_rows - 1) {
+    if (y < text_rows - 1) {
       ab_append_str(&ab, "\r\n");
     }
   }
 
+  ab_append_str(&ab, "\r\n");
   ab_append_str(&ab, "\x1b[7m");
   {
     char status[256];
     if (ed->prompt_active) {
       snprintf(status, sizeof(status), " Save as: %s", ed->prompt_buf);
     } else {
-      const char *name = ed->buffer.file_path ? ed->buffer.file_path : "[No Name]";
+      const char *name = ed->buffer.file_path ?
+        ed->buffer.file_path :
+        "[No Name]";
       const char *dirty = ed->dirty ? "*" : "";
       snprintf(status, sizeof(status), " %s%s | %zu lines | %s",
                name, dirty, ed->buffer.line_count, ed->status_msg);
@@ -589,9 +639,16 @@ void editor_refresh_screen(Editor *ed) {
     }
   }
   ab_append_str(&ab, "\x1b[m");
+  ab_append_str(&ab, "\x1b[K");
 
   int cursor_row = (int)(frame->row - ed->row_offset) + 1;
-  int cursor_col = (int)(frame->col - ed->col_offset) + 1;
+  int cursor_col = 1;
+  if (frame->row < ed->buffer.line_count) {
+    const char *line = ed->buffer.lines[frame->row];
+    size_t frame_vis = utf8_byte_to_vis_col(line, frame->col);
+    size_t offset_vis = utf8_byte_to_vis_col(line, ed->col_offset);
+    cursor_col = (int)(frame_vis - offset_vis) + 1;
+  }
   snprintf(buf, sizeof(buf), "\x1b[%d;%dH", cursor_row, cursor_col);
   ab_append_str(&ab, buf);
   ab_append_str(&ab, "\x1b[?25h");

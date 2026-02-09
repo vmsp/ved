@@ -12,4 +12,7 @@ size_t utf8_next_boundary(const char *line, size_t len, size_t col);
 size_t utf8_prev_boundary(const char *line, size_t col);
 size_t utf8_clamp_col(const char *line, size_t len, size_t col);
 
+size_t utf8_byte_to_vis_col(const char *line, size_t byte_col);
+size_t utf8_vis_to_byte_col(const char *line, size_t len, size_t vis_col);
+
 #endif
