@@ -23,10 +23,10 @@ endif
 
 srcs := \
 	src/buffer.c \
-	src/editor_core.c \
-	src/editor_input.c \
-	src/editor_render.c \
+	src/core.c \
+	src/input.c \
 	src/main.c \
+	src/render.c \
 	src/utf8.c \
 	src/util.c \
 	vendor/tree-sitter/lib/src/lib.c \
