@@ -27,6 +27,23 @@ typedef enum {
   ESC_MOUSE
 } EscState;
 
+typedef struct {
+  bool active;
+  char query[256];
+  size_t query_len;
+  char *project_root;
+  char **files;
+  size_t file_count;
+  size_t file_cap;
+  size_t *matches;
+  size_t match_count;
+  size_t match_cap;
+  void *scored;
+  size_t scored_cap;
+  size_t selection;
+  size_t scroll;
+} Finder;
+
 typedef struct Editor {
   struct termios orig_termios;
   int stdin_flags;
@@ -45,6 +62,7 @@ typedef struct Editor {
   bool prompt_save_as;
   char prompt_buf[256];
   size_t prompt_len;
+  Finder finder;
   char *kill_ring[KILL_RING_MAX];
   size_t kill_ring_len;
   size_t kill_ring_index;

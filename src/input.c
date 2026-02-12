@@ -13,6 +13,7 @@
 #include <unistd.h>
 
 #include "buffer.h"
+#include "finder.h"
 #include "utf8.h"
 #include "util.h"
 
@@ -538,6 +539,11 @@ static bool handle_meta_key(Editor *ed, uint8_t key, bool *reset_kill,
     }
     return true;
   }
+  if (key == 'p') {
+    finder_open(ed);
+    *reset_kill = true;
+    return true;
+  }
   return false;
 }
 
@@ -631,6 +637,28 @@ static bool handle_escape(Editor *ed, uint8_t key, bool *reset_kill,
     return handle_meta_key(ed, key, reset_kill, reset_yank);
   }
   if (ed->esc_state == ESC_CSI) {
+    if (key == 'A' || key == 'B' || key == 'C' || key == 'D') {
+      ed->esc_state = ESC_NONE;
+      if (ed->finder.active) {
+        if (key == 'A') {
+          finder_move_selection(ed, -1);
+        } else if (key == 'B') {
+          finder_move_selection(ed, 1);
+        }
+      } else {
+        if (key == 'A') {
+          frame_move_prev_line(&ed->frame);
+        } else if (key == 'B') {
+          frame_move_next_line(&ed->frame);
+        } else if (key == 'C') {
+          frame_move_next_char(&ed->frame);
+        } else if (key == 'D') {
+          frame_move_prev_char(&ed->frame);
+        }
+      }
+      *reset_kill = true;
+      return true;
+    }
     if (key == '<') {
       ed->esc_state = ESC_MOUSE;
       ed->esc_len = 0;
@@ -663,6 +691,11 @@ void editor_process_key(Editor *ed, uint8_t key) {
     if (handle_escape(ed, key, &reset_kill, &reset_yank)) {
       goto done;
     }
+  }
+
+  if (ed->finder.active) {
+    finder_handle_key(ed, key);
+    goto done;
   }
 
   if (key == 27) {

@@ -14,6 +14,7 @@
 #include <termios.h>
 #include <unistd.h>
 
+#include "finder.h"
 #include "util.h"
 
 static Editor *g_editor;
@@ -131,6 +132,20 @@ Editor *editor_create(int argc, char **argv) {
   ed->prompt_active = false;
   ed->prompt_save_as = false;
   ed->prompt_len = 0;
+  ed->finder.active = false;
+  ed->finder.query_len = 0;
+  ed->finder.query[0] = '\0';
+  ed->finder.project_root = NULL;
+  ed->finder.files = NULL;
+  ed->finder.file_count = 0;
+  ed->finder.file_cap = 0;
+  ed->finder.matches = NULL;
+  ed->finder.match_count = 0;
+  ed->finder.match_cap = 0;
+  ed->finder.scored = NULL;
+  ed->finder.scored_cap = 0;
+  ed->finder.selection = 0;
+  ed->finder.scroll = 0;
   for (size_t i = 0; i < KILL_RING_MAX; i++) {
     ed->kill_ring[i] = NULL;
   }
@@ -168,6 +183,7 @@ void editor_destroy(Editor *ed) {
   }
   disable_raw_mode();
   buffer_free(&ed->buffer);
+  finder_reset(ed);
   for (size_t i = 0; i < ed->kill_ring_len; i++) {
     free(ed->kill_ring[i]);
   }

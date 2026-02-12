@@ -24,6 +24,7 @@ endif
 srcs := \
 	src/buffer.c \
 	src/core.c \
+	src/finder.c \
 	src/input.c \
 	src/main.c \
 	src/render.c \

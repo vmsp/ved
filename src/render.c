@@ -13,6 +13,7 @@
 #include <unistd.h>
 
 #include "buffer.h"
+#include "finder.h"
 #include "utf8.h"
 #include "util.h"
 
@@ -94,6 +95,91 @@ static void write_all(int fd, const char *data, size_t len) {
       continue;
     }
     break;
+  }
+}
+
+static void ab_move_cursor(AppendBuf *ab, int row, int col) {
+  char buf[32];
+  snprintf(buf, sizeof(buf), "\x1b[%d;%dH", row, col);
+  ab_append_str(ab, buf);
+}
+
+static void ab_append_padded(AppendBuf *ab, const char *text, size_t width) {
+  size_t len = strlen(text);
+  if (len > width) {
+    len = width;
+  }
+  if (len > 0) {
+    ab_append(ab, text, len);
+  }
+  for (size_t i = len; i < width; i++) {
+    ab_append_char(ab, ' ');
+  }
+}
+
+static void finder_modal_geometry(Editor *ed, int text_rows, int *out_row,
+                                  int *out_col, size_t *out_width,
+                                  size_t *out_list_rows) {
+  size_t width = finder_modal_width(ed);
+  size_t list_rows = finder_list_rows(ed);
+  int start_row = 2;
+  if (start_row + (int)list_rows >= text_rows) {
+    start_row = 1;
+  }
+  if (start_row < 1) {
+    start_row = 1;
+  }
+  int start_col = (ed->screen_cols - (int)width) / 2 + 1;
+  if (start_col < 1) {
+    start_col = 1;
+  }
+  *out_row = start_row;
+  *out_col = start_col;
+  *out_width = width;
+  *out_list_rows = list_rows;
+}
+
+static void render_finder_modal(Editor *ed, AppendBuf *ab, int text_rows) {
+  if (!ed->finder.active) {
+    return;
+  }
+  int start_row = 0;
+  int start_col = 0;
+  size_t width = 0;
+  size_t list_rows = 0;
+  finder_modal_geometry(ed, text_rows, &start_row, &start_col, &width,
+                        &list_rows);
+
+  char header[512];
+  snprintf(header, sizeof(header), " Go to file: %s", ed->finder.query);
+  ab_move_cursor(ab, start_row, start_col);
+  ab_append_str(ab, "\x1b[7m");
+  ab_append_padded(ab, header, width);
+  ab_append_str(ab, "\x1b[m");
+
+  size_t count = ed->finder.match_count;
+  size_t start = ed->finder.scroll;
+  for (size_t i = 0; i < list_rows; i++) {
+    size_t row = start_row + 1 + (int)i;
+    ab_move_cursor(ab, (int)row, start_col);
+    if (count == 0 && i == 0) {
+      ab_append_padded(ab, " No matches", width);
+      continue;
+    }
+    size_t match_index = start + i;
+    if (match_index >= count) {
+      ab_append_padded(ab, "", width);
+      continue;
+    }
+    size_t file_index = ed->finder.matches[match_index];
+    const char *path = ed->finder.files[file_index];
+    if (match_index == ed->finder.selection) {
+      ab_append_str(ab, "\x1b[7m");
+      ab_append_padded(ab, path, width);
+      ab_append_str(ab, "\x1b[m");
+    } else {
+      ab_append_padded(ab, path, width);
+    }
   }
 }
 
@@ -641,9 +727,25 @@ void editor_refresh_screen(Editor *ed) {
   ab_append_str(&ab, "\x1b[m");
   ab_append_str(&ab, "\x1b[K");
 
+  render_finder_modal(ed, &ab, text_rows);
+
   int cursor_row = (int)(frame->row - ed->row_offset) + 1;
   int cursor_col = 1;
-  if (frame->row < ed->buffer.line_count) {
+  if (ed->finder.active) {
+    int start_row = 0;
+    int start_col = 0;
+    size_t width = 0;
+    size_t list_rows = 0;
+    finder_modal_geometry(ed, text_rows, &start_row, &start_col, &width,
+                          &list_rows);
+    size_t prefix = strlen(" Go to file: ");
+    size_t col = prefix + ed->finder.query_len + 1;
+    if (col > width) {
+      col = width;
+    }
+    cursor_row = start_row;
+    cursor_col = start_col + (int)col - 1;
+  } else if (frame->row < ed->buffer.line_count) {
     const char *line = ed->buffer.lines[frame->row];
     size_t frame_vis = utf8_byte_to_vis_col(line, frame->col);
     size_t offset_vis = utf8_byte_to_vis_col(line, ed->col_offset);
