@@ -11,6 +11,7 @@ VED is an emacs-style editor that runs on the terminal.
 - Do not depend on system libraries that are not generally available
 - Always compile with `make MODE=dev` after changes
 - If you're fixed something related to the previous commit, prefer to amend
+- Avoid comments unless they add something not clear in the code
 
 ## Code Style
 
