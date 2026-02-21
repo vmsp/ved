@@ -140,6 +140,152 @@ static bool is_word_char(unsigned char ch) {
          ch == '_';
 }
 
+static void prompt_move_start(Editor *ed) {
+  ed->prompt_col = 0;
+}
+
+static void prompt_move_end(Editor *ed) {
+  ed->prompt_col = ed->prompt_len;
+}
+
+static void prompt_move_prev_char(Editor *ed) {
+  ed->prompt_col = utf8_prev_boundary(ed->prompt_buf, ed->prompt_col);
+}
+
+static void prompt_move_next_char(Editor *ed) {
+  ed->prompt_col = utf8_next_boundary(ed->prompt_buf, ed->prompt_len,
+                                      ed->prompt_col);
+}
+
+static void prompt_move_prev_word(Editor *ed) {
+  size_t col = ed->prompt_col;
+  if (col == 0) {
+    return;
+  }
+  while (col > 0) {
+    size_t prev = utf8_prev_boundary(ed->prompt_buf, col);
+    unsigned char ch = (unsigned char)ed->prompt_buf[prev];
+    if (ch >= 128 || !isspace(ch)) {
+      break;
+    }
+    col = prev;
+  }
+  while (col > 0) {
+    size_t prev = utf8_prev_boundary(ed->prompt_buf, col);
+    unsigned char ch = (unsigned char)ed->prompt_buf[prev];
+    if (!is_word_char(ch)) {
+      break;
+    }
+    col = prev;
+  }
+  ed->prompt_col = col;
+}
+
+static void prompt_move_next_word(Editor *ed) {
+  size_t col = ed->prompt_col;
+  while (col < ed->prompt_len) {
+    unsigned char ch = (unsigned char)ed->prompt_buf[col];
+    if (ch >= 128 || !isspace(ch)) {
+      break;
+    }
+    col = utf8_next_boundary(ed->prompt_buf, ed->prompt_len, col);
+  }
+  while (col < ed->prompt_len) {
+    unsigned char ch = (unsigned char)ed->prompt_buf[col];
+    if (!is_word_char(ch)) {
+      break;
+    }
+    col = utf8_next_boundary(ed->prompt_buf, ed->prompt_len, col);
+  }
+  ed->prompt_col = col;
+}
+
+static void prompt_delete_range(Editor *ed, size_t start, size_t end) {
+  if (end <= start || end > ed->prompt_len) {
+    return;
+  }
+  memmove(ed->prompt_buf + start, ed->prompt_buf + end,
+          ed->prompt_len - end + 1);
+  ed->prompt_len -= end - start;
+  ed->prompt_col = start;
+}
+
+static void prompt_delete_backward(Editor *ed) {
+  if (ed->prompt_col == 0) {
+    return;
+  }
+  size_t start = utf8_prev_boundary(ed->prompt_buf, ed->prompt_col);
+  prompt_delete_range(ed, start, ed->prompt_col);
+}
+
+static void prompt_delete_forward(Editor *ed) {
+  if (ed->prompt_col >= ed->prompt_len) {
+    return;
+  }
+  size_t end = utf8_next_boundary(ed->prompt_buf, ed->prompt_len,
+                                  ed->prompt_col);
+  prompt_delete_range(ed, ed->prompt_col, end);
+}
+
+static void prompt_delete_prev_word(Editor *ed) {
+  size_t start = ed->prompt_col;
+  if (start == 0) {
+    return;
+  }
+  while (start > 0) {
+    size_t prev = utf8_prev_boundary(ed->prompt_buf, start);
+    unsigned char ch = (unsigned char)ed->prompt_buf[prev];
+    if (ch >= 128 || !isspace(ch)) {
+      break;
+    }
+    start = prev;
+  }
+  while (start > 0) {
+    size_t prev = utf8_prev_boundary(ed->prompt_buf, start);
+    unsigned char ch = (unsigned char)ed->prompt_buf[prev];
+    if (!is_word_char(ch)) {
+      break;
+    }
+    start = prev;
+  }
+  prompt_delete_range(ed, start, ed->prompt_col);
+}
+
+static void prompt_delete_next_word(Editor *ed) {
+  size_t end = ed->prompt_col;
+  while (end < ed->prompt_len) {
+    unsigned char ch = (unsigned char)ed->prompt_buf[end];
+    if (ch >= 128 || !isspace(ch)) {
+      break;
+    }
+    end = utf8_next_boundary(ed->prompt_buf, ed->prompt_len, end);
+  }
+  while (end < ed->prompt_len) {
+    unsigned char ch = (unsigned char)ed->prompt_buf[end];
+    if (!is_word_char(ch)) {
+      break;
+    }
+    end = utf8_next_boundary(ed->prompt_buf, ed->prompt_len, end);
+  }
+  prompt_delete_range(ed, ed->prompt_col, end);
+}
+
+static void prompt_kill_to_end(Editor *ed) {
+  prompt_delete_range(ed, ed->prompt_col, ed->prompt_len);
+}
+
+static void prompt_insert(Editor *ed, uint8_t key) {
+  if (ed->prompt_len + 1 >= sizeof(ed->prompt_buf)) {
+    return;
+  }
+  memmove(ed->prompt_buf + ed->prompt_col + 1,
+          ed->prompt_buf + ed->prompt_col,
+          ed->prompt_len - ed->prompt_col + 1);
+  ed->prompt_buf[ed->prompt_col] = (char)key;
+  ed->prompt_len++;
+  ed->prompt_col++;
+}
+
 static void frame_clamp_col(Frame *frame) {
   size_t len = line_length(frame->buffer, frame->row);
   const char *line = frame->buffer->lines[frame->row];
@@ -476,11 +622,44 @@ static void editor_prompt_save_as(Editor *ed) {
   ed->prompt_active = true;
   ed->prompt_save_as = true;
   ed->prompt_len = 0;
+  ed->prompt_col = 0;
   ed->prompt_buf[0] = '\0';
 }
 
 static bool handle_meta_key(Editor *ed, uint8_t key, bool *reset_kill,
                             bool *reset_yank) {
+  if (ed->prompt_active) {
+    if (key == 'p') {
+      finder_open(ed);
+      *reset_kill = true;
+      return true;
+    }
+    if (key == 'a') {
+      prompt_move_start(ed);
+      return true;
+    }
+    if (key == 'e') {
+      prompt_move_end(ed);
+      return true;
+    }
+    if (key == 'b') {
+      prompt_move_prev_word(ed);
+      return true;
+    }
+    if (key == 'f') {
+      prompt_move_next_word(ed);
+      return true;
+    }
+    if (key == 'd') {
+      prompt_delete_next_word(ed);
+      return true;
+    }
+    if (key == KEY_BACKSPACE) {
+      prompt_delete_prev_word(ed);
+      return true;
+    }
+    return true;
+  }
   if (key == 'f') {
     frame_move_next_word(&ed->frame);
     *reset_kill = true;
@@ -710,6 +889,7 @@ void editor_process_key(Editor *ed, uint8_t key) {
     ed->prompt_active = false;
     ed->prompt_save_as = false;
     ed->prompt_len = 0;
+    ed->prompt_col = 0;
     ed->mark_active = false;
     ed->last_was_kill = false;
     ed->last_was_yank = false;
@@ -721,6 +901,7 @@ void editor_process_key(Editor *ed, uint8_t key) {
     if (key == 27) {
       ed->prompt_active = false;
       ed->prompt_save_as = false;
+      ed->prompt_col = 0;
       snprintf(ed->status_msg, sizeof(ed->status_msg), "Save canceled");
       return;
     }
@@ -746,20 +927,47 @@ void editor_process_key(Editor *ed, uint8_t key) {
       }
       ed->prompt_active = false;
       ed->prompt_save_as = false;
+      ed->prompt_col = 0;
+      return;
+    }
+    if (key == CTRL_KEY('a')) {
+      prompt_move_start(ed);
+      return;
+    }
+    if (key == CTRL_KEY('e')) {
+      prompt_move_end(ed);
+      return;
+    }
+    if (key == CTRL_KEY('b')) {
+      prompt_move_prev_char(ed);
+      return;
+    }
+    if (key == CTRL_KEY('f')) {
+      prompt_move_next_char(ed);
+      return;
+    }
+    if (key == CTRL_KEY('d')) {
+      prompt_delete_forward(ed);
+      return;
+    }
+    if (key == CTRL_KEY('h')) {
+      prompt_delete_backward(ed);
+      return;
+    }
+    if (key == CTRL_KEY('w')) {
+      prompt_delete_prev_word(ed);
+      return;
+    }
+    if (key == CTRL_KEY('k')) {
+      prompt_kill_to_end(ed);
       return;
     }
     if (key == KEY_BACKSPACE) {
-      if (ed->prompt_len > 0) {
-        size_t new_len = utf8_prev_boundary(ed->prompt_buf, ed->prompt_len);
-        ed->prompt_len = new_len;
-        ed->prompt_buf[ed->prompt_len] = '\0';
-      }
+      prompt_delete_backward(ed);
       return;
     }
-    if (key >= 32 && key != KEY_BACKSPACE &&
-        ed->prompt_len + 1 < sizeof(ed->prompt_buf)) {
-      ed->prompt_buf[ed->prompt_len++] = (char)key;
-      ed->prompt_buf[ed->prompt_len] = '\0';
+    if (key >= 32 && key != KEY_BACKSPACE && key != CTRL_KEY('h')) {
+      prompt_insert(ed, key);
     }
     return;
   }

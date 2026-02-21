@@ -849,7 +849,7 @@ void editor_refresh_screen(Editor *ed) {
     size_t prefix = ed->prompt_save_as ?
       strlen(" Save as: ") :
       strlen(" ");
-    size_t col = prefix + ed->prompt_len + 1;
+    size_t col = prefix + ed->prompt_col + 1;
     if (col > width) {
       col = width;
     }

@@ -1,5 +1,4 @@
 - Undo/Redo
-- M-P
 - C-s / C-r
 - inotify
 - Rust / Makefile

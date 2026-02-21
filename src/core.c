@@ -132,6 +132,7 @@ Editor *editor_create(int argc, char **argv) {
   ed->prompt_active = false;
   ed->prompt_save_as = false;
   ed->prompt_len = 0;
+  ed->prompt_col = 0;
   ed->finder.active = false;
   ed->finder.query_len = 0;
   ed->finder.query_col = 0;

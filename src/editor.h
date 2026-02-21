@@ -63,6 +63,7 @@ typedef struct Editor {
   bool prompt_save_as;
   char prompt_buf[256];
   size_t prompt_len;
+  size_t prompt_col;
   Finder finder;
   char *kill_ring[KILL_RING_MAX];
   size_t kill_ring_len;

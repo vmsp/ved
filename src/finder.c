@@ -734,11 +734,6 @@ static void finder_load_project(Editor *ed) {
 }
 
 bool finder_open(Editor *ed) {
-  if (ed->prompt_active) {
-    snprintf(ed->status_msg, sizeof(ed->status_msg),
-             "Finish prompt first");
-    return false;
-  }
   char *root = project_root_for_editor(ed);
   if (!root) {
     snprintf(ed->status_msg, sizeof(ed->status_msg), "No project root");
