@@ -117,6 +117,13 @@ static void ab_append_padded(AppendBuf *ab, const char *text, size_t width) {
   }
 }
 
+static const char *mode_name(BufferMode mode) {
+  if (mode == MAKEFILE_MODE) {
+    return "Makefile";
+  }
+  return "C";
+}
+
 static void finder_modal_geometry(Editor *ed, int text_rows, int *out_row,
                                   int *out_col, size_t *out_width,
                                   size_t *out_list_rows) {
@@ -700,27 +707,51 @@ void editor_refresh_screen(Editor *ed) {
   ab_append_str(&ab, "\r\n");
   ab_append_str(&ab, "\x1b[7m");
   {
-    char status[256];
+    char left[512];
+    char right[64];
     if (ed->prompt_active) {
-      snprintf(status, sizeof(status), " Save as: %s", ed->prompt_buf);
+      snprintf(left, sizeof(left), " Save as: %s", ed->prompt_buf);
+      size_t len = strlen(left);
+      if (len > (size_t)ed->screen_cols) {
+        len = ed->screen_cols;
+      }
+      if (len > 0) {
+        ab_append(&ab, left, len);
+      }
+      if (len < (size_t)ed->screen_cols) {
+        for (int i = 0; i < ed->screen_cols - (int)len; i++) {
+          ab_append_char(&ab, ' ');
+        }
+      }
     } else {
       const char *name = ed->buffer.file_path ?
         ed->buffer.file_path :
         "[No Name]";
       const char *dirty = ed->dirty ? "*" : "";
-      snprintf(status, sizeof(status), " %s%s | %zu lines | %s",
-               name, dirty, ed->buffer.line_count, ed->status_msg);
-    }
-    size_t len = strlen(status);
-    if (len > (size_t)ed->screen_cols) {
-      len = ed->screen_cols;
-    }
-    if (len > 0) {
-      ab_append(&ab, status, len);
-    }
-    if (len < (size_t)ed->screen_cols) {
-      for (int i = 0; i < ed->screen_cols - (int)len; i++) {
+      const char *combo = ed->pending_ctrl_x ? "C-x" : "-";
+      snprintf(left, sizeof(left), " %s%s  L%zu  %s",
+               name, dirty, ed->frame.row + 1, combo);
+      snprintf(right, sizeof(right), " %s ", mode_name(ed->buffer.mode));
+
+      size_t cols = (size_t)ed->screen_cols;
+      size_t left_len = strlen(left);
+      size_t right_len = strlen(right);
+      if (right_len > cols) {
+        right_len = cols;
+      }
+      size_t left_cols = cols - right_len;
+      if (left_len > left_cols) {
+        left_len = left_cols;
+      }
+
+      if (left_len > 0) {
+        ab_append(&ab, left, left_len);
+      }
+      for (size_t i = left_len; i < left_cols; i++) {
         ab_append_char(&ab, ' ');
+      }
+      if (right_len > 0) {
+        ab_append(&ab, right, right_len);
       }
     }
   }
