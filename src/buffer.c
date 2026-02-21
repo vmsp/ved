@@ -181,11 +181,9 @@ bool buffer_write_file(Buffer *buf, const char *path) {
         return false;
       }
     }
-    if (i + 1 < buf->line_count) {
-      if (write(fd, "\n", 1) != 1) {
-        close(fd);
-        return false;
-      }
+    if (write(fd, "\n", 1) != 1) {
+      close(fd);
+      return false;
     }
   }
   if (close(fd) == -1) {
