@@ -75,6 +75,12 @@ static void ab_append_char(AppendBuf *ab, char ch) {
   ab_append(ab, &ch, 1);
 }
 
+static void ab_append_repeat(AppendBuf *ab, const char *text, size_t count) {
+  for (size_t i = 0; i < count; i++) {
+    ab_append_str(ab, text);
+  }
+}
+
 static void write_all(int fd, const char *data, size_t len) {
   size_t offset = 0;
   while (offset < len) {
@@ -117,6 +123,31 @@ static void ab_append_padded(AppendBuf *ab, const char *text, size_t width) {
   }
 }
 
+static void render_modal_border(AppendBuf *ab, int row, int col, size_t width,
+                                const char *left, const char *fill,
+                                const char *right) {
+  ab_move_cursor(ab, row, col);
+  ab_append_str(ab, "\x1b[97m");
+  ab_append_str(ab, left);
+  ab_append_repeat(ab, fill, width);
+  ab_append_str(ab, right);
+  ab_append_str(ab, "\x1b[m");
+}
+
+static void render_modal_line(AppendBuf *ab, int row, int col, size_t width,
+                              const char *text, bool highlighted) {
+  ab_move_cursor(ab, row, col);
+  ab_append_str(ab, "\x1b[97m┃\x1b[m");
+  if (highlighted) {
+    ab_append_str(ab, "\x1b[7m");
+  }
+  ab_append_padded(ab, text, width);
+  if (highlighted) {
+    ab_append_str(ab, "\x1b[m");
+  }
+  ab_append_str(ab, "\x1b[97m┃\x1b[m");
+}
+
 static const char *mode_name(BufferMode mode) {
   if (mode == MAKEFILE_MODE) {
     return "Makefile";
@@ -129,14 +160,16 @@ static void finder_modal_geometry(Editor *ed, int text_rows, int *out_row,
                                   size_t *out_list_rows) {
   size_t width = finder_modal_width(ed);
   size_t list_rows = finder_list_rows(ed);
+  int total_rows = (int)list_rows + 4;
+  int total_cols = (int)width + 2;
   int start_row = 2;
-  if (start_row + (int)list_rows >= text_rows) {
-    start_row = 1;
+  if (start_row + total_rows - 1 > text_rows) {
+    start_row = text_rows - total_rows + 1;
   }
   if (start_row < 1) {
     start_row = 1;
   }
-  int start_col = (ed->screen_cols - (int)width) / 2 + 1;
+  int start_col = (ed->screen_cols - total_cols) / 2 + 1;
   if (start_col < 1) {
     start_col = 1;
   }
@@ -144,6 +177,38 @@ static void finder_modal_geometry(Editor *ed, int text_rows, int *out_row,
   *out_col = start_col;
   *out_width = width;
   *out_list_rows = list_rows;
+}
+
+static void prompt_modal_geometry(Editor *ed, int text_rows, int *out_row,
+                                  int *out_col, size_t *out_width) {
+  int width = ed->screen_cols - 6;
+  if (width > 70) {
+    width = 70;
+  }
+  if (width < 24) {
+    width = ed->screen_cols - 2;
+  }
+  if (width < 12) {
+    width = 12;
+  }
+  int total_cols = width + 2;
+  int start_row = text_rows / 2;
+  if (start_row < 1) {
+    start_row = 1;
+  }
+  if (start_row + 2 > text_rows) {
+    start_row = text_rows - 2;
+  }
+  if (start_row < 1) {
+    start_row = 1;
+  }
+  int start_col = (ed->screen_cols - total_cols) / 2 + 1;
+  if (start_col < 1) {
+    start_col = 1;
+  }
+  *out_row = start_row;
+  *out_col = start_col;
+  *out_width = (size_t)width;
 }
 
 static void render_finder_modal(Editor *ed, AppendBuf *ab, int text_rows) {
@@ -159,35 +224,50 @@ static void render_finder_modal(Editor *ed, AppendBuf *ab, int text_rows) {
 
   char header[512];
   snprintf(header, sizeof(header), " Go to file: %s", ed->finder.query);
-  ab_move_cursor(ab, start_row, start_col);
-  ab_append_str(ab, "\x1b[7m");
-  ab_append_padded(ab, header, width);
-  ab_append_str(ab, "\x1b[m");
+  render_modal_border(ab, start_row, start_col, width, "┏", "━", "┓");
+  render_modal_line(ab, start_row + 1, start_col, width, header, false);
+  render_modal_border(ab, start_row + 2, start_col, width, "┣", "━", "┫");
 
   size_t count = ed->finder.match_count;
   size_t start = ed->finder.scroll;
   for (size_t i = 0; i < list_rows; i++) {
-    size_t row = start_row + 1 + (int)i;
-    ab_move_cursor(ab, (int)row, start_col);
+    size_t row = start_row + 3 + (int)i;
     if (count == 0 && i == 0) {
-      ab_append_padded(ab, " No matches", width);
+      render_modal_line(ab, (int)row, start_col, width,
+                        " No matches", false);
       continue;
     }
     size_t match_index = start + i;
     if (match_index >= count) {
-      ab_append_padded(ab, "", width);
+      render_modal_line(ab, (int)row, start_col, width, "", false);
       continue;
     }
     size_t file_index = ed->finder.matches[match_index];
     const char *path = ed->finder.files[file_index];
-    if (match_index == ed->finder.selection) {
-      ab_append_str(ab, "\x1b[7m");
-      ab_append_padded(ab, path, width);
-      ab_append_str(ab, "\x1b[m");
-    } else {
-      ab_append_padded(ab, path, width);
-    }
+    bool selected = match_index == ed->finder.selection;
+    render_modal_line(ab, (int)row, start_col, width, path, selected);
   }
+  render_modal_border(ab, start_row + 3 + (int)list_rows,
+                      start_col, width, "┗", "━", "┛");
+}
+
+static void render_prompt_modal(Editor *ed, AppendBuf *ab, int text_rows) {
+  if (!ed->prompt_active) {
+    return;
+  }
+  int start_row = 0;
+  int start_col = 0;
+  size_t width = 0;
+  prompt_modal_geometry(ed, text_rows, &start_row, &start_col, &width);
+  char line[512];
+  if (ed->prompt_save_as) {
+    snprintf(line, sizeof(line), " Save as: %s", ed->prompt_buf);
+  } else {
+    snprintf(line, sizeof(line), " %s", ed->prompt_buf);
+  }
+  render_modal_border(ab, start_row, start_col, width, "┏", "━", "┓");
+  render_modal_line(ab, start_row + 1, start_col, width, line, false);
+  render_modal_border(ab, start_row + 2, start_col, width, "┗", "━", "┛");
 }
 
 static const char *capture_color(const char *name) {
@@ -709,55 +789,40 @@ void editor_refresh_screen(Editor *ed) {
   {
     char left[512];
     char right[64];
-    if (ed->prompt_active) {
-      snprintf(left, sizeof(left), " Save as: %s", ed->prompt_buf);
-      size_t len = strlen(left);
-      if (len > (size_t)ed->screen_cols) {
-        len = ed->screen_cols;
-      }
-      if (len > 0) {
-        ab_append(&ab, left, len);
-      }
-      if (len < (size_t)ed->screen_cols) {
-        for (int i = 0; i < ed->screen_cols - (int)len; i++) {
-          ab_append_char(&ab, ' ');
-        }
-      }
-    } else {
-      const char *name = ed->buffer.file_path ?
-        ed->buffer.file_path :
-        "[No Name]";
-      const char *dirty = ed->dirty ? "*" : "";
-      const char *combo = ed->pending_ctrl_x ? "C-x" : "-";
-      snprintf(left, sizeof(left), " %s%s  L%zu  %s",
-               name, dirty, ed->frame.row + 1, combo);
-      snprintf(right, sizeof(right), " %s ", mode_name(ed->buffer.mode));
+    const char *name = ed->buffer.file_path ?
+      ed->buffer.file_path :
+      "[No Name]";
+    const char *dirty = ed->dirty ? "*" : "";
+    const char *combo = ed->pending_ctrl_x ? "C-x" : "-";
+    snprintf(left, sizeof(left), " %s%s  L%zu  %s",
+             name, dirty, ed->frame.row + 1, combo);
+    snprintf(right, sizeof(right), " %s ", mode_name(ed->buffer.mode));
 
-      size_t cols = (size_t)ed->screen_cols;
-      size_t left_len = strlen(left);
-      size_t right_len = strlen(right);
-      if (right_len > cols) {
-        right_len = cols;
-      }
-      size_t left_cols = cols - right_len;
-      if (left_len > left_cols) {
-        left_len = left_cols;
-      }
+    size_t cols = (size_t)ed->screen_cols;
+    size_t left_len = strlen(left);
+    size_t right_len = strlen(right);
+    if (right_len > cols) {
+      right_len = cols;
+    }
+    size_t left_cols = cols - right_len;
+    if (left_len > left_cols) {
+      left_len = left_cols;
+    }
 
-      if (left_len > 0) {
-        ab_append(&ab, left, left_len);
-      }
-      for (size_t i = left_len; i < left_cols; i++) {
-        ab_append_char(&ab, ' ');
-      }
-      if (right_len > 0) {
-        ab_append(&ab, right, right_len);
-      }
+    if (left_len > 0) {
+      ab_append(&ab, left, left_len);
+    }
+    for (size_t i = left_len; i < left_cols; i++) {
+      ab_append_char(&ab, ' ');
+    }
+    if (right_len > 0) {
+      ab_append(&ab, right, right_len);
     }
   }
   ab_append_str(&ab, "\x1b[m");
   ab_append_str(&ab, "\x1b[K");
 
+  render_prompt_modal(ed, &ab, text_rows);
   render_finder_modal(ed, &ab, text_rows);
 
   int cursor_row = (int)(frame->row - ed->row_offset) + 1;
@@ -774,8 +839,22 @@ void editor_refresh_screen(Editor *ed) {
     if (col > width) {
       col = width;
     }
-    cursor_row = start_row;
-    cursor_col = start_col + (int)col - 1;
+    cursor_row = start_row + 1;
+    cursor_col = start_col + (int)col;
+  } else if (ed->prompt_active) {
+    int start_row = 0;
+    int start_col = 0;
+    size_t width = 0;
+    prompt_modal_geometry(ed, text_rows, &start_row, &start_col, &width);
+    size_t prefix = ed->prompt_save_as ?
+      strlen(" Save as: ") :
+      strlen(" ");
+    size_t col = prefix + ed->prompt_len + 1;
+    if (col > width) {
+      col = width;
+    }
+    cursor_row = start_row + 1;
+    cursor_col = start_col + (int)col;
   } else if (frame->row < ed->buffer.line_count) {
     const char *line = ed->buffer.lines[frame->row];
     size_t frame_vis = utf8_byte_to_vis_col(line, frame->col);
