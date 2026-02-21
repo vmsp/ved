@@ -770,7 +770,7 @@ void editor_refresh_screen(Editor *ed) {
     finder_modal_geometry(ed, text_rows, &start_row, &start_col, &width,
                           &list_rows);
     size_t prefix = strlen(" Go to file: ");
-    size_t col = prefix + ed->finder.query_len + 1;
+    size_t col = prefix + ed->finder.query_col + 1;
     if (col > width) {
       col = width;
     }

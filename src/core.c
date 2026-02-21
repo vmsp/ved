@@ -134,6 +134,7 @@ Editor *editor_create(int argc, char **argv) {
   ed->prompt_len = 0;
   ed->finder.active = false;
   ed->finder.query_len = 0;
+  ed->finder.query_col = 0;
   ed->finder.query[0] = '\0';
   ed->finder.project_root = NULL;
   ed->finder.files = NULL;

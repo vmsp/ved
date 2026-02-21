@@ -481,6 +481,16 @@ static int match_compare(const void *a, const void *b) {
   return 0;
 }
 
+static bool finder_is_word_char(unsigned char ch) {
+  if (ch >= 128) {
+    return true;
+  }
+  return (ch >= 'a' && ch <= 'z') ||
+         (ch >= 'A' && ch <= 'Z') ||
+         (ch >= '0' && ch <= '9') ||
+         ch == '_';
+}
+
 static void finder_update_matches(Editor *ed) {
   finder_matches_clear(ed);
   if (ed->finder.file_count == 0) {
@@ -568,6 +578,95 @@ static void finder_adjust_scroll(Editor *ed) {
   } else if (ed->finder.selection >= ed->finder.scroll + rows) {
     ed->finder.scroll = ed->finder.selection - rows + 1;
   }
+}
+
+static void finder_query_move_start(Editor *ed) {
+  ed->finder.query_col = 0;
+}
+
+static void finder_query_move_end(Editor *ed) {
+  ed->finder.query_col = ed->finder.query_len;
+}
+
+static void finder_query_move_prev(Editor *ed) {
+  ed->finder.query_col = utf8_prev_boundary(ed->finder.query,
+                                            ed->finder.query_col);
+}
+
+static void finder_query_move_next(Editor *ed) {
+  ed->finder.query_col = utf8_next_boundary(ed->finder.query,
+                                            ed->finder.query_len,
+                                            ed->finder.query_col);
+}
+
+static void finder_query_delete_range(Editor *ed, size_t start, size_t end) {
+  if (end <= start || end > ed->finder.query_len) {
+    return;
+  }
+  memmove(ed->finder.query + start,
+          ed->finder.query + end,
+          ed->finder.query_len - end + 1);
+  ed->finder.query_len -= (end - start);
+  ed->finder.query_col = start;
+  finder_update_matches(ed);
+}
+
+static void finder_query_backspace(Editor *ed) {
+  if (ed->finder.query_col == 0) {
+    return;
+  }
+  size_t start = utf8_prev_boundary(ed->finder.query, ed->finder.query_col);
+  finder_query_delete_range(ed, start, ed->finder.query_col);
+}
+
+static void finder_query_delete_forward(Editor *ed) {
+  if (ed->finder.query_col >= ed->finder.query_len) {
+    return;
+  }
+  size_t end = utf8_next_boundary(ed->finder.query, ed->finder.query_len,
+                                  ed->finder.query_col);
+  finder_query_delete_range(ed, ed->finder.query_col, end);
+}
+
+static void finder_query_delete_prev_word(Editor *ed) {
+  size_t col = ed->finder.query_col;
+  if (col == 0) {
+    return;
+  }
+  while (col > 0) {
+    size_t prev = utf8_prev_boundary(ed->finder.query, col);
+    unsigned char ch = (unsigned char)ed->finder.query[prev];
+    if (ch >= 128 || !isspace(ch)) {
+      break;
+    }
+    col = prev;
+  }
+  while (col > 0) {
+    size_t prev = utf8_prev_boundary(ed->finder.query, col);
+    unsigned char ch = (unsigned char)ed->finder.query[prev];
+    if (!finder_is_word_char(ch)) {
+      break;
+    }
+    col = prev;
+  }
+  finder_query_delete_range(ed, col, ed->finder.query_col);
+}
+
+static void finder_query_kill_to_end(Editor *ed) {
+  finder_query_delete_range(ed, ed->finder.query_col, ed->finder.query_len);
+}
+
+static void finder_query_insert(Editor *ed, uint8_t key) {
+  if (ed->finder.query_len + 1 >= sizeof(ed->finder.query)) {
+    return;
+  }
+  memmove(ed->finder.query + ed->finder.query_col + 1,
+          ed->finder.query + ed->finder.query_col,
+          ed->finder.query_len - ed->finder.query_col + 1);
+  ed->finder.query[ed->finder.query_col] = (char)key;
+  ed->finder.query_len++;
+  ed->finder.query_col++;
+  finder_update_matches(ed);
 }
 
 void finder_move_selection(Editor *ed, int delta) {
@@ -659,6 +758,7 @@ bool finder_open(Editor *ed) {
 
   ed->finder.active = true;
   ed->finder.query_len = 0;
+  ed->finder.query_col = 0;
   ed->finder.query[0] = '\0';
   finder_update_matches(ed);
   return true;
@@ -672,6 +772,7 @@ void finder_reset(Editor *ed) {
   finder_files_clear(ed);
   ed->finder.active = false;
   ed->finder.query_len = 0;
+  ed->finder.query_col = 0;
   ed->finder.query[0] = '\0';
   free(ed->finder.project_root);
   ed->finder.project_root = NULL;
@@ -698,13 +799,11 @@ void finder_handle_key(Editor *ed, uint8_t key) {
     return;
   }
   if (key == KEY_BACKSPACE) {
-    if (ed->finder.query_len > 0) {
-      size_t new_len = utf8_prev_boundary(ed->finder.query,
-                                          ed->finder.query_len);
-      ed->finder.query_len = new_len;
-      ed->finder.query[ed->finder.query_len] = '\0';
-      finder_update_matches(ed);
-    }
+    finder_query_backspace(ed);
+    return;
+  }
+  if (key == CTRL_KEY('h')) {
+    finder_query_backspace(ed);
     return;
   }
   if (key == CTRL_KEY('p')) {
@@ -715,10 +814,36 @@ void finder_handle_key(Editor *ed, uint8_t key) {
     finder_move_selection(ed, 1);
     return;
   }
+  if (key == CTRL_KEY('a')) {
+    finder_query_move_start(ed);
+    return;
+  }
+  if (key == CTRL_KEY('e')) {
+    finder_query_move_end(ed);
+    return;
+  }
+  if (key == CTRL_KEY('b')) {
+    finder_query_move_prev(ed);
+    return;
+  }
+  if (key == CTRL_KEY('f')) {
+    finder_query_move_next(ed);
+    return;
+  }
+  if (key == CTRL_KEY('d')) {
+    finder_query_delete_forward(ed);
+    return;
+  }
+  if (key == CTRL_KEY('w')) {
+    finder_query_delete_prev_word(ed);
+    return;
+  }
+  if (key == CTRL_KEY('k')) {
+    finder_query_kill_to_end(ed);
+    return;
+  }
   if (key >= 32 && key != KEY_BACKSPACE &&
-      ed->finder.query_len + 1 < sizeof(ed->finder.query)) {
-    ed->finder.query[ed->finder.query_len++] = (char)key;
-    ed->finder.query[ed->finder.query_len] = '\0';
-    finder_update_matches(ed);
+      key != CTRL_KEY('h')) {
+    finder_query_insert(ed, key);
   }
 }

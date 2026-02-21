@@ -31,6 +31,7 @@ typedef struct {
   bool active;
   char query[256];
   size_t query_len;
+  size_t query_col;
   char *project_root;
   char **files;
   size_t file_count;
