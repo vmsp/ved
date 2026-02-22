@@ -78,6 +78,7 @@ Exit VED with `C-x C-c`.
 ### Editing
 
 - `Enter`: insert newline
+- `C-o`: insert an empty line above the current line
 - `Tab`: insert tab in Makefile mode, otherwise 2 spaces
 - `Backspace`: delete backward
 - `C-d`: delete forward

@@ -165,7 +165,7 @@ static void prompt_move_prev_word(Editor *ed) {
   while (col > 0) {
     size_t prev = utf8_prev_boundary(ed->prompt_buf, col);
     unsigned char ch = (unsigned char)ed->prompt_buf[prev];
-    if (ch >= 128 || !isspace(ch)) {
+    if (is_word_char(ch)) {
       break;
     }
     col = prev;
@@ -185,7 +185,7 @@ static void prompt_move_next_word(Editor *ed) {
   size_t col = ed->prompt_col;
   while (col < ed->prompt_len) {
     unsigned char ch = (unsigned char)ed->prompt_buf[col];
-    if (ch >= 128 || !isspace(ch)) {
+    if (is_word_char(ch)) {
       break;
     }
     col = utf8_next_boundary(ed->prompt_buf, ed->prompt_len, col);
@@ -601,7 +601,7 @@ static void frame_move_next_word(Frame *frame) {
 
     while (col < len) {
       unsigned char ch = (unsigned char)line[col];
-      if (ch >= 128 || !isspace(ch)) {
+      if (is_word_char(ch)) {
         break;
       }
       col = utf8_next_boundary(line, len, col);
@@ -644,7 +644,7 @@ static void frame_move_prev_word(Frame *frame) {
     while (col > 0) {
       size_t prev = utf8_prev_boundary(line, col);
       unsigned char ch = (unsigned char)line[prev];
-      if (ch >= 128 || !isspace(ch)) {
+      if (is_word_char(ch)) {
         break;
       }
       col = prev;
@@ -1307,6 +1307,12 @@ void editor_process_key(Editor *ed, uint8_t key) {
       break;
     case CTRL_KEY('e'):
       frame_move_line_end(&ed->frame);
+      break;
+    case CTRL_KEY('o'):
+      buffer_insert_newline(&ed->buffer, ed->frame.row, 0);
+      ed->frame.row++;
+      ed->dirty = true;
+      ed->buffer.syntax_dirty = true;
       break;
     case CTRL_KEY('k'): {
       Buffer *buf = &ed->buffer;
