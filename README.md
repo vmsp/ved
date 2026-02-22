@@ -1,10 +1,10 @@
 # Vitor's Editor
 
-Vitor's Editor (VED) is a POSIX-compliant, MicroEmacs-style editor for terminal
-sessions. It is written in C23, runs in raw terminal mode, requires no external
+Vitor's Editor (VED) is a MicroEmacs-inspired terminal editor for POSIX systems.
+It is written in C23, runs in raw terminal mode, requires no external
 dependencies and uses an event-driven, non-blocking input loop.
 
-![Screenshot of VED editing this repository's `src/render.c`](/screenshot.png)
+![Screenshot of VED editing this repository's `src/render.c`](screenshot.png)
 
 ## Features
 
@@ -121,6 +121,6 @@ set -g set-clipboard on
 
 ## License
 
-Copyright (c) 2026 Vitor Manuel de Sousa Pereira <vmsousapereira@gmail.com>.
+Copyright (c) 2026 Vitor Manuel de Sousa Pereira. All rights reserved.
 
-Distributed unser the MIT license. See [LICENSE](LICENSE).
+Distributed under the MIT license. See [LICENSE](LICENSE).
