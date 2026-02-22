@@ -137,6 +137,13 @@ Editor *editor_create(int argc, char **argv) {
   ed->prompt_save_as = false;
   ed->prompt_len = 0;
   ed->prompt_col = 0;
+  ed->isearch_active = false;
+  ed->isearch_forward = true;
+  ed->isearch_has_match = false;
+  ed->isearch_query[0] = '\0';
+  ed->isearch_len = 0;
+  ed->isearch_origin_row = 0;
+  ed->isearch_origin_col = 0;
   ed->finder.active = false;
   ed->finder.query_len = 0;
   ed->finder.query_col = 0;

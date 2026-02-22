@@ -65,6 +65,13 @@ typedef struct Editor {
   char prompt_buf[256];
   size_t prompt_len;
   size_t prompt_col;
+  bool isearch_active;
+  bool isearch_forward;
+  bool isearch_has_match;
+  char isearch_query[256];
+  size_t isearch_len;
+  size_t isearch_origin_row;
+  size_t isearch_origin_col;
   Finder finder;
   char *kill_ring[KILL_RING_MAX];
   size_t kill_ring_len;

@@ -1,5 +1,4 @@
 - Undo/Redo
-- C-s / C-r
 - inotify
 - Rust / Makefile
 - C-a, C-e MWIM

@@ -286,6 +286,253 @@ static void prompt_insert(Editor *ed, uint8_t key) {
   ed->prompt_col++;
 }
 
+static void isearch_set_status(Editor *ed, bool failed) {
+  const char *prefix = NULL;
+  if (failed) {
+    prefix = ed->isearch_forward ?
+      "Failing I-search forward: " :
+      "Failing I-search backward: ";
+  } else {
+    prefix = ed->isearch_forward ?
+      "I-search forward: " :
+      "I-search backward: ";
+  }
+  snprintf(ed->status_msg, sizeof(ed->status_msg), "%s%s",
+           prefix, ed->isearch_query);
+}
+
+static bool line_search_forward(const char *line, size_t start,
+                                const char *needle, size_t needle_len,
+                                size_t *out_col) {
+  size_t line_len = strlen(line);
+  if (needle_len == 0 || line_len < needle_len) {
+    return false;
+  }
+  if (start > line_len - needle_len) {
+    return false;
+  }
+  for (size_t col = start; col + needle_len <= line_len; col++) {
+    bool match = true;
+    for (size_t i = 0; i < needle_len; i++) {
+      unsigned char lhs = (unsigned char)line[col + i];
+      unsigned char rhs = (unsigned char)needle[i];
+      if (tolower(lhs) != tolower(rhs)) {
+        match = false;
+        break;
+      }
+    }
+    if (match) {
+      *out_col = col;
+      return true;
+    }
+  }
+  return false;
+}
+
+static bool line_search_backward(const char *line, size_t end_col,
+                                 const char *needle, size_t needle_len,
+                                 size_t *out_col) {
+  size_t line_len = strlen(line);
+  if (needle_len == 0 || line_len < needle_len) {
+    return false;
+  }
+  size_t max_col = line_len - needle_len;
+  if (end_col > max_col) {
+    end_col = max_col;
+  }
+  bool found = false;
+  size_t found_col = 0;
+  for (size_t col = 0; col <= end_col; col++) {
+    bool match = true;
+    for (size_t i = 0; i < needle_len; i++) {
+      unsigned char lhs = (unsigned char)line[col + i];
+      unsigned char rhs = (unsigned char)needle[i];
+      if (tolower(lhs) != tolower(rhs)) {
+        match = false;
+        break;
+      }
+    }
+    if (match) {
+      found = true;
+      found_col = col;
+    }
+  }
+  if (!found) {
+    return false;
+  }
+  *out_col = found_col;
+  return true;
+}
+
+static bool search_forward_from(Editor *ed, size_t start_row, size_t start_col,
+                                size_t *out_row, size_t *out_col) {
+  for (size_t row = start_row; row < ed->buffer.line_count; row++) {
+    const char *line = ed->buffer.lines[row];
+    size_t col = 0;
+    size_t from = 0;
+    if (row == start_row) {
+      size_t len = line_length(&ed->buffer, row);
+      from = start_col > len ? len : start_col;
+    }
+    if (line_search_forward(line, from, ed->isearch_query, ed->isearch_len,
+                            &col)) {
+      *out_row = row;
+      *out_col = col;
+      return true;
+    }
+  }
+  return false;
+}
+
+static bool search_backward_from(Editor *ed, size_t start_row, size_t start_col,
+                                 size_t *out_row, size_t *out_col) {
+  for (size_t row = start_row + 1; row > 0; row--) {
+    size_t i = row - 1;
+    const char *line = ed->buffer.lines[i];
+    size_t end_col = SIZE_MAX;
+    if (i == start_row) {
+      size_t len = line_length(&ed->buffer, i);
+      if (start_col > len) {
+        start_col = len;
+      }
+      if (start_col < ed->isearch_len) {
+        continue;
+      }
+      end_col = start_col - ed->isearch_len;
+    }
+    size_t col = 0;
+    if (line_search_backward(line, end_col, ed->isearch_query,
+                             ed->isearch_len, &col)) {
+      *out_row = i;
+      *out_col = col;
+      return true;
+    }
+  }
+  return false;
+}
+
+static void isearch_begin(Editor *ed, bool forward) {
+  if (!ed->isearch_active) {
+    ed->isearch_active = true;
+    ed->isearch_len = 0;
+    ed->isearch_query[0] = '\0';
+    ed->isearch_origin_row = ed->frame.row;
+    ed->isearch_origin_col = ed->frame.col;
+    ed->isearch_has_match = false;
+  }
+  ed->isearch_forward = forward;
+  isearch_set_status(ed, false);
+}
+
+static void isearch_finish(Editor *ed, bool restore_origin) {
+  if (!ed->isearch_active) {
+    return;
+  }
+  if (restore_origin) {
+    ed->frame.row = ed->isearch_origin_row;
+    ed->frame.col = ed->isearch_origin_col;
+  }
+  ed->isearch_active = false;
+  ed->isearch_has_match = false;
+  ed->isearch_len = 0;
+  ed->isearch_query[0] = '\0';
+  ed->status_msg[0] = '\0';
+}
+
+static bool isearch_find(Editor *ed, bool repeat) {
+  if (ed->isearch_len == 0) {
+    ed->frame.row = ed->isearch_origin_row;
+    ed->frame.col = ed->isearch_origin_col;
+    ed->isearch_has_match = false;
+    isearch_set_status(ed, false);
+    return true;
+  }
+
+  size_t start_row = ed->isearch_origin_row;
+  size_t start_col = ed->isearch_origin_col;
+  if (repeat && ed->isearch_has_match) {
+    start_row = ed->frame.row;
+    start_col = ed->frame.col;
+    const char *line = ed->buffer.lines[start_row];
+    size_t line_len = line_length(&ed->buffer, start_row);
+    if (ed->isearch_forward) {
+      start_col = utf8_next_boundary(line, line_len, start_col);
+    } else if (start_col > 0) {
+      start_col = utf8_prev_boundary(line, start_col);
+    }
+  }
+
+  size_t row = 0;
+  size_t col = 0;
+  bool found = ed->isearch_forward ?
+    search_forward_from(ed, start_row, start_col, &row, &col) :
+    search_backward_from(ed, start_row, start_col, &row, &col);
+  if (found) {
+    ed->frame.row = row;
+    ed->frame.col = col;
+    ed->isearch_has_match = true;
+    isearch_set_status(ed, false);
+    return true;
+  }
+  ed->isearch_has_match = false;
+  isearch_set_status(ed, true);
+  return false;
+}
+
+static void isearch_backspace(Editor *ed) {
+  if (ed->isearch_len == 0) {
+    return;
+  }
+  size_t prev = utf8_prev_boundary(ed->isearch_query, ed->isearch_len);
+  ed->isearch_query[prev] = '\0';
+  ed->isearch_len = prev;
+  isearch_find(ed, false);
+}
+
+static bool isearch_handle_key(Editor *ed, uint8_t key) {
+  if (!ed->isearch_active) {
+    return false;
+  }
+  if (key == CTRL_KEY('g')) {
+    isearch_finish(ed, true);
+    return true;
+  }
+  if (key == '\r') {
+    isearch_finish(ed, false);
+    return true;
+  }
+  if (key == 27) {
+    isearch_finish(ed, false);
+    return false;
+  }
+  if (key == CTRL_KEY('s')) {
+    ed->isearch_forward = true;
+    isearch_find(ed, true);
+    return true;
+  }
+  if (key == CTRL_KEY('r')) {
+    ed->isearch_forward = false;
+    isearch_find(ed, true);
+    return true;
+  }
+  if (key == KEY_BACKSPACE || key == CTRL_KEY('h')) {
+    isearch_backspace(ed);
+    return true;
+  }
+  if (key >= 32 && key != KEY_BACKSPACE &&
+      key != CTRL_KEY('h')) {
+    if (ed->isearch_len + 1 < sizeof(ed->isearch_query)) {
+      ed->isearch_query[ed->isearch_len] = (char)key;
+      ed->isearch_len++;
+      ed->isearch_query[ed->isearch_len] = '\0';
+      isearch_find(ed, false);
+    }
+    return true;
+  }
+  isearch_finish(ed, false);
+  return false;
+}
+
 static void frame_clamp_col(Frame *frame) {
   size_t len = line_length(frame->buffer, frame->row);
   const char *line = frame->buffer->lines[frame->row];
@@ -628,6 +875,9 @@ static void editor_prompt_save_as(Editor *ed) {
 
 static bool handle_meta_key(Editor *ed, uint8_t key, bool *reset_kill,
                             bool *reset_yank) {
+  if (key >= 'A' && key <= 'Z') {
+    key = (uint8_t)(key - 'A' + 'a');
+  }
   if (ed->prompt_active) {
     if (key == 'p') {
       finder_open(ed);
@@ -843,6 +1093,20 @@ static bool handle_escape(Editor *ed, uint8_t key, bool *reset_kill,
       ed->esc_len = 0;
       return true;
     }
+    if ((key >= '0' && key <= '9') || key == ';') {
+      if (ed->esc_len + 1 < sizeof(ed->esc_buf)) {
+        ed->esc_buf[ed->esc_len++] = (char)key;
+      } else {
+        ed->esc_state = ESC_NONE;
+      }
+      return true;
+    }
+    if (key == 'p' || key == 'P') {
+      ed->esc_state = ESC_NONE;
+      finder_open(ed);
+      *reset_kill = true;
+      return true;
+    }
     ed->esc_state = ESC_NONE;
     return false;
   }
@@ -877,6 +1141,10 @@ void editor_process_key(Editor *ed, uint8_t key) {
     goto done;
   }
 
+  if (isearch_handle_key(ed, key)) {
+    goto done;
+  }
+
   if (key == 27) {
     ed->esc_state = ESC_SEEN;
     goto done;
@@ -893,7 +1161,7 @@ void editor_process_key(Editor *ed, uint8_t key) {
     ed->mark_active = false;
     ed->last_was_kill = false;
     ed->last_was_yank = false;
-    snprintf(ed->status_msg, sizeof(ed->status_msg), "Quit");
+    snprintf(ed->status_msg, sizeof(ed->status_msg), "Canceled");
     return;
   }
 
@@ -991,6 +1259,15 @@ void editor_process_key(Editor *ed, uint8_t key) {
       ed->should_exit = true;
       return;
     }
+  }
+
+  if (key == CTRL_KEY('s')) {
+    isearch_begin(ed, true);
+    goto done;
+  }
+  if (key == CTRL_KEY('r')) {
+    isearch_begin(ed, false);
+    goto done;
   }
 
   switch (key) {

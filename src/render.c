@@ -793,9 +793,19 @@ void editor_refresh_screen(Editor *ed) {
       ed->buffer.file_path :
       "[No Name]";
     const char *dirty = ed->dirty ? "*" : "";
-    const char *combo = ed->pending_ctrl_x ? "C-x" : "-";
-    snprintf(left, sizeof(left), " %s%s  L%zu  %s",
-             name, dirty, ed->frame.row + 1, combo);
+    const char *ctx = "";
+    if (ed->status_msg[0] != '\0') {
+      ctx = ed->status_msg;
+    } else if (ed->pending_ctrl_x) {
+      ctx = "C-x";
+    }
+    if (ctx[0] != '\0') {
+      snprintf(left, sizeof(left), " %s%s  L%zu  %s",
+               name, dirty, ed->frame.row + 1, ctx);
+    } else {
+      snprintf(left, sizeof(left), " %s%s  L%zu",
+               name, dirty, ed->frame.row + 1);
+    }
     snprintf(right, sizeof(right), " %s ", mode_name(ed->buffer.mode));
 
     size_t cols = (size_t)ed->screen_cols;

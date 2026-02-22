@@ -96,6 +96,8 @@ Exit VED with `C-x C-c`.
 ### Features
 
 - `M-p`: open file finder (from project root containing `.git/`)
+- `C-s`: incremental search forward
+- `C-r`: incremental search backward
 - `C-x C-s`: save file
 - `C-g`: cancel pending `C-x`, close prompt, clear mark, clear state
 - `C-x C-c`: exit editor
