@@ -55,6 +55,7 @@ typedef struct Editor {
   Buffer buffer;
   Frame frame;
   bool dirty;
+  bool should_exit;
   bool pending_ctrl_x;
   EscState esc_state;
   char esc_buf[32];

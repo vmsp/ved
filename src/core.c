@@ -57,7 +57,7 @@ static void enable_raw_mode(Editor *ed) {
   raw.c_iflag &= ~(BRKINT | ICRNL | INPCK | ISTRIP | IXON);
   raw.c_oflag &= ~(OPOST);
   raw.c_cflag |= (CS8);
-  raw.c_lflag &= ~(ECHO | ICANON | IEXTEN);
+  raw.c_lflag &= ~(ECHO | ICANON | IEXTEN | ISIG);
   raw.c_cc[VMIN] = 0;
   raw.c_cc[VTIME] = 0;
   if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw) == -1) {
@@ -100,6 +100,9 @@ static void editor_loop(Editor *ed) {
         for (ssize_t i = 0; i < nread; i++) {
           editor_process_key(ed, buf[i]);
         }
+        if (ed->should_exit) {
+          return;
+        }
         get_window_size(ed);
         editor_refresh_screen(ed);
       } else if (nread == -1 && errno != EAGAIN) {
@@ -126,6 +129,7 @@ Editor *editor_create(int argc, char **argv) {
     buffer_load_file(&ed->buffer, argv[1]);
   }
   ed->dirty = false;
+  ed->should_exit = false;
   ed->pending_ctrl_x = false;
   ed->esc_state = ESC_NONE;
   ed->esc_len = 0;

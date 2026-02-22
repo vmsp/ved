@@ -987,6 +987,10 @@ void editor_process_key(Editor *ed, uint8_t key) {
       reset_kill = true;
       goto done;
     }
+    if (key == CTRL_KEY('c')) {
+      ed->should_exit = true;
+      return;
+    }
   }
 
   switch (key) {
